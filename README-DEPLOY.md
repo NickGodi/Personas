@@ -14,12 +14,12 @@
    O cadastro feito com esse e-mail e `@nick` recebe o cargo de criador. Os demais recebem o cargo de jogador. Os `@` e Riot IDs iniciais ficam reservados para impedir que alguém assuma um perfil já existente.
 
 3. Em **Authentication → URL Configuration**, configure o endereço público do site como Site URL e adicione também `http://localhost:3000` e a URL de produção na lista de Redirect URLs.
-4. Configure na Vercel as variáveis `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` usando a URL do projeto e a chave pública anon/publishable. Nunca coloque a chave `service_role` no front-end.
+4. Configure na Vercel `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY`. A chave `service_role` deve ficar apenas como variável de ambiente de servidor e nunca pode começar com `VITE_` nem ir para o front-end/repositório. Adicione `GEMINI_API_KEY` apenas se quiser ativar OCR real.
 5. As contas são criadas pelo Supabase Auth. Quando a confirmação de e-mail estiver ativa, a pessoa confirma o endereço e depois entra no site. O e-mail não é publicado nos perfis.
 
 Para desenvolvimento local, copie `.env.example` para `.env.local` e preencha as mesmas duas variáveis.
 
 ## Estado do torneio
 
-O cadastro e a lista de perfis são compartilhados via Supabase. O estado de partidas e temporadas ainda usa a API Express/arquivo local do modo de desenvolvimento. Antes de operar um torneio em produção na Vercel, esse estado também precisa ser migrado para armazenamento persistente compartilhado.
+O cadastro, a lista de perfis, a presença e o estado de equipes usam o Supabase compartilhado. Em produção, as funções de `api/` validam a sessão Supabase e persistem o estado do torneio no banco. O Express local continua disponível para desenvolvimento.
 

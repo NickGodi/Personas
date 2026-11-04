@@ -43,7 +43,7 @@ import { readStorage, writeStorage } from './utils/storage';
 import { CARD_ORNAMENT_SETTINGS_VERSION, CARD_ORNAMENT_SETTINGS_VERSION_KEY, CARD_ORNAMENT_STORAGE_KEY, loadCardOrnamentSettings, loadTierCardOrnamentSettings, migrateCardOrnamentSettings, TIER_CARD_ORNAMENT_STORAGE_KEY } from './utils/cardOrnament';
 import { normalizeStats } from './utils/stats';
 import { normalizeEmail, normalizeHandle, normalizeRiotId, validateUniqueUserIdentity } from './utils/userIdentity';
-import { supabase, loadAuthenticatedProfile, loadRegisteredProfiles, mergeRegisteredProfiles, saveAuthenticatedProfile } from './lib/supabase';
+import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, mergeRegisteredProfiles, saveAuthenticatedProfile } from './lib/supabase';
 import { 
   Sparkles, 
   Trophy, 
@@ -515,9 +515,10 @@ export default function App() {
     let isCancelled = false;
     const refreshPresence = async () => {
       try {
+        const authorization = await getSupabaseAuthorizationHeaders();
         await fetch('/api/presence', {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authorization },
           body: JSON.stringify({ sessionId, userId: presenceActorId }),
         });
         const response = await fetch('/api/presence');
@@ -539,10 +540,11 @@ export default function App() {
     return () => {
       isCancelled = true;
       window.clearInterval(heartbeat);
-      void fetch(`/api/presence?sessionId=${encodeURIComponent(sessionId)}`, {
+      void getSupabaseAuthorizationHeaders().then((authorization) => fetch(`/api/presence?sessionId=${encodeURIComponent(sessionId)}`, {
         method: 'DELETE',
+        headers: authorization,
         keepalive: true,
-      }).catch(() => undefined);
+      })).catch(() => undefined);
     };
   }, [presenceActorId, presenceSessionId]);
 
@@ -767,15 +769,15 @@ export default function App() {
   useEffect(() => {
     if (!isSharedTournamentReady || !currentUser) return;
     let isDisposed = false;
-    void fetch('/api/tournament-state', {
+    void getSupabaseAuthorizationHeaders().then((authorization) => fetch('/api/tournament-state', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authorization },
       body: JSON.stringify({
         state: sharedTournament,
         actorId: currentUser.id,
         actorRole: canAccessCreatorPanel ? 'criador' : 'viewer',
       }),
-    }).then(async (response) => {
+    })).then(async (response) => {
       if (!response.ok || isDisposed) return;
       const payload = await response.json();
       if (payload.state) {

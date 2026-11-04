@@ -46,6 +46,24 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now()
 );
 
+-- Estado compartilhado do torneio e sessões online, usados pelas funções serverless da Vercel.
+create table if not exists public.shared_app_state (
+  state_key text primary key check (state_key = 'tournament'),
+  state jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.presence_sessions (
+  session_id text primary key,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  profile_handle text not null,
+  last_seen_at timestamptz not null default now()
+);
+create index if not exists presence_sessions_last_seen_idx on public.presence_sessions (last_seen_at);
+alter table public.shared_app_state enable row level security;
+alter table public.presence_sessions enable row level security;
+revoke all on public.shared_app_state, public.presence_sessions from public, anon, authenticated;
+
 alter table public.profiles enable row level security;
 revoke all on public.profiles from anon, authenticated;
 grant select on public.profiles to anon, authenticated;

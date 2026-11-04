@@ -15,6 +15,13 @@ export const supabase = supabaseUrl && supabaseAnonKey
 
 export const isSharedAccountsEnabled = Boolean(supabase);
 
+export async function getSupabaseAuthorizationHeaders(): Promise<Record<string, string>> {
+  if (!supabase) return {};
+  const { data } = await supabase.auth.getSession();
+  const accessToken = data.session?.access_token;
+  return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
+}
+
 type ProfileRow = {
   id: string;
   handle: string;
