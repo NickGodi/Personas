@@ -48,7 +48,8 @@ import {
   Sparkles, 
   Trophy, 
   Flame, 
-  Search
+  Search,
+  FlaskConical,
 } from 'lucide-react';
 
 // Strict tier rank hierarchy (from highest to lowest)
@@ -1530,6 +1531,24 @@ export default function App() {
             {/* Hero Banner */}
             <div className="cards-hero relative rounded-3xl overflow-hidden p-6 md:p-9 border shadow-2xl">
               <div className="relative z-10 max-w-3xl lg:max-w-[64%]">
+                <div className="mb-3">
+                  <button
+                    type="button"
+                    aria-label="Beta: site em desenvolvimento"
+                    aria-describedby="site-beta-tooltip"
+                    className="group relative inline-flex cursor-help items-center gap-1.5 rounded-full border border-amber-400/40 bg-amber-950/65 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-amber-200 outline-none transition hover:border-amber-300/70 hover:bg-amber-900/70 focus-visible:ring-2 focus-visible:ring-amber-300"
+                  >
+                    <FlaskConical className="h-3.5 w-3.5 text-amber-300" />
+                    <span>Beta</span>
+                    <span
+                      id="site-beta-tooltip"
+                      role="tooltip"
+                      className="pointer-events-none absolute left-0 top-[calc(100%+0.5rem)] z-30 w-60 rounded-xl border border-amber-700/60 bg-slate-950 px-3 py-2 text-left text-[11px] font-medium normal-case leading-relaxed tracking-normal text-slate-200 opacity-0 shadow-xl transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                    >
+                      Site em desenvolvimento. Algumas funções e conteúdos ainda podem mudar.
+                    </span>
+                  </button>
+                </div>
                 <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-red-950/80 border border-red-700/60 text-red-300 text-xs font-mono mb-4">
                   <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                   <span>ARQUIVO OFICIAL · TEMPORADA {String(activeSeason.number).padStart(2, '0')}</span>

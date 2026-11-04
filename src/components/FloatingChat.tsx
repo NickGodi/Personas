@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, ChatMessage } from '../types';
 import { sound } from '../utils/audio';
+import mascotAvatar from '../assets/images/personas_duck_mascot_1793729518059.jpg';
 import { MessageSquare, X, Send, Crown, Sparkles } from 'lucide-react';
 
 interface FloatingChatProps {
@@ -18,8 +19,6 @@ export const FloatingChat: React.FC<FloatingChatProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputText, setInputText] = useState('');
-
-  const mascotAvatar = '/src/assets/images/personas_duck_mascot_1793729518059.jpg';
 
   const handleSend = (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,9 +42,6 @@ export const FloatingChat: React.FC<FloatingChatProps> = ({
                   src={mascotAvatar}
                   alt="Patinho Real Mascot"
                   className="w-8 h-8 rounded-full object-cover border border-amber-400 shadow-sm"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/assets/aistudio/1MVP_120b3a16.png';
-                  }}
                 />
                 <span className="absolute -top-1 -right-1 w-3 h-3 bg-emerald-500 border-2 border-black rounded-full" />
               </div>
@@ -160,9 +156,6 @@ export const FloatingChat: React.FC<FloatingChatProps> = ({
             src={mascotAvatar}
             alt="Patinho da Coroa"
             className="w-full h-full object-cover"
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = '/assets/aistudio/1MVP_120b3a16.png';
-            }}
           />
         </div>
 
