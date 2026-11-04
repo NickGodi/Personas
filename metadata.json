@@ -1,0 +1,6 @@
+{
+  "name": "Personas",
+  "description": "Acompanhe as cartas oficiais, elos, votações, times e regras da comunidade Personas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
