@@ -3,8 +3,10 @@ import { createClient, type User as AuthUser } from '@supabase/supabase-js';
 import type { Request, Response } from 'express';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY
+  || process.env.SUPABASE_ANON_KEY
+  || process.env.SUPABASE_PUBLISHABLE_KEY;
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
 const admin = supabaseUrl && serviceRoleKey
   ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
   : null;

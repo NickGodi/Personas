@@ -14,7 +14,7 @@
    O cadastro feito com esse e-mail e `@nick` recebe o cargo de criador. Os demais recebem o cargo de jogador. Os `@` e Riot IDs iniciais ficam reservados para impedir que alguém assuma um perfil já existente.
 
 3. Em **Authentication → URL Configuration**, configure o endereço público do site como Site URL e adicione também `http://localhost:3000` e a URL de produção na lista de Redirect URLs.
-4. Configure na Vercel `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY`. A chave `service_role` deve ficar apenas como variável de ambiente de servidor e nunca pode começar com `VITE_` nem ir para o front-end/repositório. Adicione `GEMINI_API_KEY` apenas se quiser ativar OCR real.
+4. Configure na Vercel `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY`. A integração Supabase do Vercel também é aceita: ela fornece `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` e `SUPABASE_SECRET_KEY`; a URL e a chave publicável são incorporadas no build do front-end, enquanto a chave secreta fica apenas nas funções de servidor. Nunca exponha a chave secreta com prefixo `VITE_` nem a coloque no repositório. Adicione `GEMINI_API_KEY` apenas se quiser ativar OCR real.
 5. As contas são criadas pelo Supabase Auth. Quando a confirmação de e-mail estiver ativa, a pessoa confirma o endereço e depois entra no site. O e-mail não é publicado nos perfis.
 
 Para desenvolvimento local, copie `.env.example` para `.env.local` e preencha as mesmas duas variáveis.

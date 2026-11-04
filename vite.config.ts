@@ -6,8 +6,20 @@ import {defineConfig} from 'vite';
 const projectRoot = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig(() => {
+  // Vercel's Supabase integration uses unprefixed variable names. Only the
+  // project URL and publishable key are exposed to the browser build.
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '';
+  const supabasePublicKey = process.env.VITE_SUPABASE_ANON_KEY
+    || process.env.SUPABASE_ANON_KEY
+    || process.env.SUPABASE_PUBLISHABLE_KEY
+    || '';
+
   return {
     plugins: [react(), tailwindcss()],
+    define: {
+      'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
+      'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabasePublicKey),
+    },
     resolve: {
       alias: {
         '@': projectRoot,
