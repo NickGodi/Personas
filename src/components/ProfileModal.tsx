@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { User, CardItem, Lane, SeasonArchive, EloTier, VoteRecord } from '../types';
 import { getTierFromScore } from '../data/initialData';
 import { RankedCard } from './RankedCard';
@@ -16,6 +16,7 @@ import {
   Star,
   Trash2,
   Trophy,
+  Upload,
   X,
 } from 'lucide-react';
 
@@ -97,6 +98,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [commentInput, setCommentInput] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
   const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
+  const [avatarLoading, setAvatarLoading] = useState(false);
+  const avatarFileInput = useRef<HTMLInputElement>(null);
 
   const userCards = useMemo(() => allCards.filter((card) => card.userId === user.id), [allCards, user.id]);
   const availableSeasons = useMemo(
@@ -124,6 +127,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     : null;
   const tier = currentAverage === null ? null : getTierFromScore(currentAverage, Boolean(user.isCriminoso));
   const kda = ((user.stats.kills + user.stats.assists) / Math.max(1, user.stats.deaths)).toFixed(2);
+  const avatarPreview = avatar.trim() || user.avatar;
 
   if (!isOpen) return null;
 
@@ -139,6 +143,43 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       return;
     }
     onClose();
+  };
+
+  const handleAvatarFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setProfileSaveError(null);
+    if (!file.type.startsWith('image/')) {
+      setProfileSaveError('Escolha um arquivo de imagem (JPG, PNG ou WebP).');
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setProfileSaveError('A imagem precisa ter no máximo 8 MB.');
+      return;
+    }
+
+    setAvatarLoading(true);
+    try {
+      const bitmap = await createImageBitmap(file);
+      const scale = Math.min(1, 512 / bitmap.width, 512 / bitmap.height);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Não foi possível processar esta imagem.');
+      context.fillStyle = '#0b1020';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      const compressedAvatar = canvas.toDataURL('image/jpeg', 0.82);
+      if (compressedAvatar.length > 600_000) throw new Error('A imagem ficou muito grande. Escolha uma imagem menor.');
+      setAvatar(compressedAvatar);
+    } catch (caught) {
+      setProfileSaveError(caught instanceof Error ? caught.message : 'Não foi possível carregar esta imagem.');
+    } finally {
+      setAvatarLoading(false);
+    }
   };
 
   const handleSubmitComment = (event: React.FormEvent) => {
@@ -188,7 +229,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       >
         <header className="flex items-center justify-between gap-3 border-b border-red-900/40 bg-gradient-to-r from-red-950/80 via-slate-900 to-slate-950 p-4">
           <div className="flex min-w-0 items-center gap-3">
-            <img src={user.avatar} alt="" className="h-12 w-12 shrink-0 rounded-xl border-2 border-amber-400 object-cover" />
+            <img src={avatarPreview} alt="" className="h-12 w-12 shrink-0 rounded-xl border-2 border-amber-400 object-cover" />
             <div className="min-w-0">
               <h2 id="player-profile-title" className="flex flex-wrap items-center gap-2 font-display text-base font-black text-white sm:text-lg">
                 <span className="truncate">{user.name}</span>
@@ -257,10 +298,28 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 <label className="text-slate-300">E-mail de login (privado)
                   <input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setProfileSaveError(null); }} placeholder="voce@exemplo.com" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 p-2.5 text-white" />
                 </label>
-                <label className="text-slate-300 md:col-span-2">Substituir foto do perfil (URL)
-                  <input value={avatar} onChange={(event) => setAvatar(event.target.value)} placeholder="Cole aqui uma URL para trocar a foto atual" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 p-2.5 text-white" />
-                  <span className="mt-1 flex items-center gap-2 text-[10px] text-slate-500"><img src={avatar || user.avatar} alt="" className="h-8 w-8 rounded-lg border border-slate-700 object-cover" /> A foto aparece no seu perfil e em todas as suas cartas.</span>
-                </label>
+                <div className="md:col-span-2">
+                  <span className="text-slate-300">Foto do perfil</span>
+                  <div className="mt-1 flex flex-wrap items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/60 p-3">
+                    <img src={avatarPreview} alt="Prévia da foto do perfil" className="h-14 w-14 rounded-xl border border-slate-700 object-cover" />
+                    <div className="min-w-0 flex-1">
+                      <button
+                        type="button"
+                        onClick={() => avatarFileInput.current?.click()}
+                        disabled={avatarLoading}
+                        className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-amber-600/50 bg-amber-950/40 px-3 py-2 text-xs font-bold text-amber-200 transition hover:bg-amber-900/60 disabled:cursor-wait disabled:opacity-60"
+                      >
+                        <Upload className="h-4 w-4" />
+                        {avatarLoading ? 'Carregando foto…' : 'Escolher foto do computador'}
+                      </button>
+                      <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">JPG, PNG ou WebP, até 8 MB. A imagem é otimizada e aparece no perfil e nas cartas após salvar.</p>
+                    </div>
+                  </div>
+                  <input ref={avatarFileInput} type="file" accept="image/*" onChange={handleAvatarFileChange} className="sr-only" tabIndex={-1} aria-label="Selecionar foto de perfil do computador" />
+                  <label className="mt-3 block text-[11px] text-slate-400">Ou usar uma URL de imagem
+                    <input value={avatar.startsWith('data:') ? '' : avatar} onChange={(event) => setAvatar(event.target.value)} placeholder="https://exemplo.com/foto.jpg" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 p-2.5 text-white" />
+                  </label>
+                </div>
                 <label className="text-slate-300">Riot ID / nick no jogo
                   <input value={riotId} onChange={(event) => { setRiotId(event.target.value); setProfileSaveError(null); }} placeholder="Ex.: jogador#BR1" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 p-2.5 font-mono text-white" />
                 </label>
