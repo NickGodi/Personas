@@ -1,9 +1,8 @@
-import { createApiHandler } from '../server/vercelApi';
-
-const handler = createApiHandler('health');
+import { parseOcrMatchStats } from '../src/utils/matchStats';
 
 export default {
-  fetch(request: Request) {
-    return handler.fetch(request);
+  fetch() {
+    const parsed = parseOcrMatchStats('{"playerName":"Nick","kills":19,"deaths":9,"assists":5,"minions":330,"gold":23941}');
+    return Response.json({ status: 'ok', parsed });
   },
 };
