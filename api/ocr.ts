@@ -1,3 +1,9 @@
 import { createApiHandler } from '../server/vercelApi';
 
-export default createApiHandler('ocr');
+const handler = createApiHandler('ocr');
+
+export default {
+  fetch(request: Request) {
+    return handler.fetch(request);
+  },
+};
