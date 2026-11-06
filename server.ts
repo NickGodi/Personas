@@ -243,6 +243,35 @@ async function startServer() {
 
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+        const ocrApiUrl = process.env.PERSONAS_OCR_API_URL;
+        if (ocrApiUrl) {
+          let upstreamUrl: URL;
+          try {
+            upstreamUrl = new URL(ocrApiUrl);
+          } catch {
+            return res.status(503).json({ success: false, error: 'A URL de OCR remoto está inválida.' });
+          }
+          if (upstreamUrl.protocol !== 'https:' || upstreamUrl.hostname !== 'personas-mu.vercel.app' || upstreamUrl.pathname !== '/api/ocr') {
+            return res.status(503).json({ success: false, error: 'A URL de OCR remoto precisa apontar para um endpoint HTTPS /api/ocr.' });
+          }
+
+          try {
+            const authorization = req.get('authorization');
+            const upstreamResponse = await fetch(upstreamUrl, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(authorization ? { Authorization: authorization } : {}),
+              },
+              body: JSON.stringify({ imageBase64, mimeType }),
+            });
+            const responseBody = await upstreamResponse.text();
+            const responseType = upstreamResponse.headers.get('content-type')?.split(';', 1)[0] || 'application/json';
+            return res.status(upstreamResponse.status).type(responseType).send(responseBody);
+          } catch {
+            return res.status(502).json({ success: false, error: 'Não foi possível conectar ao serviço de OCR. Tente novamente.' });
+          }
+        }
         return res.status(503).json({ success: false, error: 'O OCR não está configurado neste servidor. Configure GEMINI_API_KEY.' });
       }
 
