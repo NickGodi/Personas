@@ -14,6 +14,7 @@ export const ORNAMENT_TIER_ORDER: EloTier[] = [
 export type TierCardOrnamentSettings = Partial<Record<EloTier, CardOrnamentSettings>>;
 
 export const DEFAULT_CARD_ORNAMENT_SETTINGS: CardOrnamentSettings = {
+  showFrame: true,
   scale: 1,
   heightScale: 1,
   topScale: 0.8,
@@ -53,15 +54,19 @@ export function normalizeTierCardOrnamentSettings(
 ): TierCardOrnamentSettings {
   return Object.fromEntries(ORNAMENT_TIER_ORDER.map((tier) => [
     tier,
-    normalizeCardOrnamentSettings(value?.[tier] ?? fallback[tier] ?? DEFAULT_CARD_ORNAMENT_SETTINGS),
+    normalizeCardOrnamentSettings({
+      ...(fallback[tier] ?? DEFAULT_CARD_ORNAMENT_SETTINGS),
+      ...(value?.[tier] ?? {}),
+    }),
   ])) as TierCardOrnamentSettings;
 }
 
 export function loadTierCardOrnamentSettings(
   cards: CardItem[],
   fallback: CardOrnamentSettings = DEFAULT_CARD_ORNAMENT_SETTINGS,
+  portableSettings: Partial<Record<EloTier, Partial<CardOrnamentSettings>>> = {},
 ): TierCardOrnamentSettings {
-  const seeded = createTierCardOrnamentSettings(cards, fallback);
+  const seeded = normalizeTierCardOrnamentSettings(portableSettings, createTierCardOrnamentSettings(cards, fallback));
   const stored = readStorage<Partial<Record<EloTier, Partial<CardOrnamentSettings>>> | null>(TIER_CARD_ORNAMENT_STORAGE_KEY, null);
   return stored ? normalizeTierCardOrnamentSettings(stored, seeded) : seeded;
 }
@@ -96,6 +101,7 @@ export function normalizeCardOrnamentSettings(
   const offsetY = Number(value?.offsetY);
 
   return {
+    showFrame: value?.showFrame !== false,
     scale: Number.isFinite(scale) ? Math.min(1.8, Math.max(0.8, scale)) : DEFAULT_CARD_ORNAMENT_SETTINGS.scale,
     heightScale: Number.isFinite(heightScale) ? Math.min(1.8, Math.max(0.8, heightScale)) : DEFAULT_CARD_ORNAMENT_SETTINGS.heightScale,
     topScale: Number.isFinite(topScale) ? Math.min(3, Math.max(0.7, topScale)) : DEFAULT_CARD_ORNAMENT_SETTINGS.topScale,

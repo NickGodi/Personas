@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowUpToLine, Check, Move, RotateCcw, Save, Scaling } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, Check, Eye, EyeOff, Move, RotateCcw, Save, Scaling } from 'lucide-react';
 import { CardItem, CardOrnamentSettings, EloTier, User } from '../types';
 import { DEFAULT_CARD_ORNAMENT_SETTINGS, getTierOrnamentReferenceCard, normalizeCardOrnamentSettings, ORNAMENT_TIER_ORDER, TierCardOrnamentSettings } from '../utils/cardOrnament';
 import { RankedCard } from './RankedCard';
@@ -142,7 +142,7 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
 
   useEffect(() => {
     setDraft(normalizeCardOrnamentSettings(selectedSettings));
-  }, [previewTier, selectedSettings.scale, selectedSettings.heightScale, selectedSettings.topScale, selectedSettings.offsetX, selectedSettings.offsetY, selectedSettings.layer]);
+  }, [previewTier, selectedSettings.showFrame, selectedSettings.scale, selectedSettings.heightScale, selectedSettings.topScale, selectedSettings.offsetX, selectedSettings.offsetY, selectedSettings.layer]);
 
   const persistSettings = useCallback(async (tier: EloTier, settings: CardOrnamentSettings) => {
     const requestId = ++saveRequestId.current;
@@ -228,7 +228,11 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
           ) : (
             <p className="text-center text-sm text-slate-400">A prévia deste elo estará disponível em instantes.</p>
           )}
-          <p className="max-w-sm text-center text-[11px] leading-relaxed text-slate-400">Este padrão é aplicado a todas as cartas de {TIER_LABELS[previewTier] || previewTier}, atuais e futuras.</p>
+          <p className="max-w-sm text-center text-[11px] leading-relaxed text-slate-400">
+            {draft.showFrame
+              ? `Este padrão é aplicado a todas as cartas de ${TIER_LABELS[previewTier] || previewTier}, atuais e futuras.`
+              : `A moldura foi removida de todas as cartas de ${TIER_LABELS[previewTier] || previewTier}.`}
+          </p>
         </div>
 
         <div className="space-y-4">
@@ -247,6 +251,24 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
               O padrão escolhido alcança todas as cartas desse elo, mesmo quando ainda não existe uma carta publicada.
             </span>
           </label>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/20 bg-amber-950/15 p-3">
+            <div>
+              <p className="text-xs font-bold text-white">Moldura deste elo</p>
+              <p className="mt-1 text-[11px] text-slate-400">
+                {draft.showFrame ? 'A moldura aparece nas cartas atuais e futuras.' : 'As cartas deste elo aparecem sem moldura.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-pressed={!draft.showFrame}
+              onClick={() => updateDraft({ showFrame: !draft.showFrame })}
+              className={`inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold transition-colors ${draft.showFrame ? 'border-rose-500/40 bg-rose-950/40 text-rose-200 hover:bg-rose-900/50' : 'border-emerald-500/40 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-900/50'}`}
+            >
+              {draft.showFrame ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {draft.showFrame ? 'Remover moldura' : 'Restaurar moldura'}
+            </button>
+          </div>
 
           <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
             <span className="text-xs font-semibold text-slate-200">Versão para conferir na prévia</span>
@@ -358,7 +380,7 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
             </button>
             <button
               type="button"
-              onClick={() => saveSettings(DEFAULT_CARD_ORNAMENT_SETTINGS)}
+              onClick={() => saveSettings({ ...DEFAULT_CARD_ORNAMENT_SETTINGS, showFrame: previewTier !== 'lenda' })}
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 text-xs font-bold text-slate-300 transition hover:border-slate-500 hover:text-white"
             >
               <RotateCcw className="h-4 w-4" /> Restaurar este elo

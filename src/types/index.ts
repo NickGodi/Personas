@@ -19,6 +19,8 @@ export type EloTier =
 export type Lane = 'TOP' | 'JUNGLE' | 'MID' | 'ADC' | 'SUPORTE' | 'PREENCHER';
 
 export interface CardOrnamentSettings {
+  /** Whether cards of this tier render the ornamental frame. */
+  showFrame: boolean;
   /** Global frame scale as a multiplier (1 = current base size). */
   scale: number;
   /** Extra vertical scale for extending the frame below the card. */

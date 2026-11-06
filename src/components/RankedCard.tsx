@@ -330,13 +330,18 @@ export const RankedCard: React.FC<RankedCardProps> = ({
         className={`relative ${dimensions} group cursor-pointer transition-all duration-300 transform perspective-1000 ${
           isHovered ? 'scale-105 -translate-y-2' : ''
         }`}
-        style={{ marginTop: `${legendTopOverhang + 10}px`, marginBottom: `${legendBottomOverhang}px` }}
+        style={{
+          marginTop: activeOrnamentSettings.showFrame ? `${legendTopOverhang + 10}px` : 0,
+          marginBottom: activeOrnamentSettings.showFrame ? `${legendBottomOverhang}px` : 0,
+        }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         onClick={onClick}
       >
         {/* Animated Neon Glow Border */}
-        <div className="absolute -inset-1.5 rounded-[28px] bg-gradient-to-r from-red-600 via-amber-400 to-rose-600 opacity-80 blur-md animate-neon-pulse group-hover:opacity-100 transition-opacity" />
+        {activeOrnamentSettings.showFrame && (
+          <div className="absolute -inset-1.5 rounded-[28px] bg-gradient-to-r from-red-600 via-amber-400 to-rose-600 opacity-80 blur-md animate-neon-pulse group-hover:opacity-100 transition-opacity" />
+        )}
 
         {/* Outer Card Body */}
         <div className="relative w-full h-full rounded-[26px] bg-gradient-to-b from-[#f8fafc] via-[#f1f5f9] to-[#e2e8f0] p-2 border-2 border-[#d4af37] shadow-2xl overflow-hidden flex flex-col justify-between text-slate-800">
@@ -417,7 +422,7 @@ export const RankedCard: React.FC<RankedCardProps> = ({
 
           </div>
         </div>
-        <div className={`pointer-events-none absolute ${legendOrnamentLayer}`} style={legendOrnamentStyle}>
+        {activeOrnamentSettings.showFrame && <div className={`pointer-events-none absolute ${legendOrnamentLayer}`} style={legendOrnamentStyle}>
           {activeOrnamentSettings.topScale >= 0.999 && activeOrnamentSettings.topScale <= 1.001 ? (
             <img src={legendFrameSource} alt="" aria-hidden="true" className="h-full w-full object-fill" style={{ filter: legendOrnamentFilter }} />
           ) : (
@@ -427,7 +432,7 @@ export const RankedCard: React.FC<RankedCardProps> = ({
               <OrnamentFrameSlice src={legendFrameSource} sourceStart={0.76} sourceEnd={1} destinationStart={0.76} destinationEnd={1} filter={legendOrnamentFilter} />
             </>
           )}
-        </div>
+        </div>}
       </div>
     );
   }
@@ -438,23 +443,26 @@ export const RankedCard: React.FC<RankedCardProps> = ({
       className={`relative ${dimensions} group cursor-pointer transition-all duration-300 transform perspective-1000 ${
         isHovered ? 'scale-105 -translate-y-2' : ''
       }`}
-      style={{ marginTop: `${ornamentTopOverhang + 10}px`, marginBottom: `${ornamentBottomOverhang}px` }}
+      style={{
+        marginTop: activeOrnamentSettings.showFrame ? `${ornamentTopOverhang + 10}px` : 0,
+        marginBottom: activeOrnamentSettings.showFrame ? `${ornamentBottomOverhang}px` : 0,
+      }}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={onClick}
     >
       {/* Lower tiers keep light on their top and bottom ornaments, without side glow. */}
-      {removeSideRails ? (
+      {activeOrnamentSettings.showFrame && (removeSideRails ? (
         <>
           <div className="pointer-events-none absolute -top-1 left-5 right-5 h-1 rounded-full blur-sm transition-opacity group-hover:opacity-100" style={{ backgroundColor: currentTheme.topHelmetColor, boxShadow: `0 0 18px ${currentTheme.topHelmetColor}` }} />
           <div className="pointer-events-none absolute -bottom-1 left-5 right-5 h-1 rounded-full blur-sm transition-opacity group-hover:opacity-100" style={{ backgroundColor: currentTheme.bottomWingsColor, boxShadow: `0 0 20px ${currentTheme.bottomWingsColor}` }} />
         </>
       ) : (
         <div className={`absolute -inset-1 rounded-[28px] opacity-60 blur-md group-hover:opacity-100 transition-opacity ${currentTheme.glow}`} />
-      )}
+      ))}
 
       {/* Front mode places the full ornament over the card details, as requested. */}
-      <div className={`pointer-events-none absolute ${ornamentLayer}`} style={ornamentStyle}>
+      {activeOrnamentSettings.showFrame && <div className={`pointer-events-none absolute ${ornamentLayer}`} style={ornamentStyle}>
         {activeOrnamentSettings.topScale >= 0.999 && activeOrnamentSettings.topScale <= 1.001 ? (
           <img
             src={rankCardFrameSource}
@@ -491,7 +499,7 @@ export const RankedCard: React.FC<RankedCardProps> = ({
             />
           </>
         )}
-      </div>
+      </div>}
 
       {usesCustomTierFrame && card.isMvp && (
         <div className="pointer-events-none absolute left-[7%] top-[10%] z-[70] flex h-6 items-center gap-1 rounded-md border border-amber-300 bg-gradient-to-r from-amber-500 to-yellow-300 px-2 text-[9px] font-black tracking-wider text-slate-950 shadow-[0_0_12px_rgba(245,158,11,0.65)]">

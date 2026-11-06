@@ -24,6 +24,7 @@ import {
   getTierFromScore 
 } from './data/initialData';
 import { Navbar } from './components/Navbar';
+import { PORTABLE_CARD_ORNAMENT_SETTINGS } from './data/cardOrnamentSettings';
 import { RankedCard } from './components/RankedCard';
 import { CardRoulette } from './components/CardRoulette';
 import { TeamDraft } from './components/TeamDraft';
@@ -371,7 +372,7 @@ export default function App() {
   });
   const [cardOrnamentSettings, setCardOrnamentSettings] = useState<CardOrnamentSettings>(loadCardOrnamentSettings);
   const [tierOrnamentSettings, setTierOrnamentSettings] = useState(() =>
-    loadTierCardOrnamentSettings(INITIAL_APP_CARDS, loadCardOrnamentSettings())
+    loadTierCardOrnamentSettings(INITIAL_APP_CARDS, loadCardOrnamentSettings(), PORTABLE_CARD_ORNAMENT_SETTINGS)
   );
   const legacyTierOrnamentSettings = useRef(tierOrnamentSettings);
 
