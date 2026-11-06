@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   User, 
   CardItem, 
@@ -40,10 +40,10 @@ import { SeasonControlBanner } from './components/SeasonControlBanner';
 import { SeasonCelebration } from './components/SeasonCelebration';
 import mascotAvatar from './assets/images/personas_duck_mascot_1793729518059.jpg';
 import { readStorage, writeStorage } from './utils/storage';
-import { CARD_ORNAMENT_SETTINGS_VERSION, CARD_ORNAMENT_SETTINGS_VERSION_KEY, CARD_ORNAMENT_STORAGE_KEY, loadCardOrnamentSettings, loadTierCardOrnamentSettings, migrateCardOrnamentSettings, TIER_CARD_ORNAMENT_STORAGE_KEY } from './utils/cardOrnament';
+import { CARD_ORNAMENT_SETTINGS_VERSION, CARD_ORNAMENT_SETTINGS_VERSION_KEY, CARD_ORNAMENT_STORAGE_KEY, DEFAULT_CARD_ORNAMENT_SETTINGS, loadCardOrnamentSettings, loadTierCardOrnamentSettings, migrateCardOrnamentSettings, normalizeCardOrnamentSettings, normalizeTierCardOrnamentSettings, ORNAMENT_TIER_ORDER, TIER_CARD_ORNAMENT_STORAGE_KEY } from './utils/cardOrnament';
 import { normalizeStats } from './utils/stats';
 import { normalizeEmail, normalizeHandle, normalizeRiotId, validateUniqueUserIdentity } from './utils/userIdentity';
-import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, mergeRegisteredProfiles, saveAuthenticatedProfile } from './lib/supabase';
+import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, mergeRegisteredProfiles, saveAuthenticatedProfile, saveSharedCardOrnamentSettings } from './lib/supabase';
 import { 
   Sparkles, 
   Trophy, 
@@ -373,6 +373,7 @@ export default function App() {
   const [tierOrnamentSettings, setTierOrnamentSettings] = useState(() =>
     loadTierCardOrnamentSettings(INITIAL_APP_CARDS, loadCardOrnamentSettings())
   );
+  const legacyTierOrnamentSettings = useRef(tierOrnamentSettings);
 
   // Core Data States
   const [users, setUsers] = useState<User[]>(() =>
@@ -676,6 +677,43 @@ export default function App() {
   useEffect(() => {
     writeStorage(TIER_CARD_ORNAMENT_STORAGE_KEY, tierOrnamentSettings);
   }, [tierOrnamentSettings]);
+
+  useEffect(() => {
+    if (!supabase) return;
+    let isDisposed = false;
+    const refreshSharedOrnaments = async () => {
+      try {
+        const sharedSettings = await loadSharedCardOrnamentSettings();
+        if (!sharedSettings || isDisposed) return;
+
+        if (currentUser?.role === 'criador') {
+          const mergedSettings = { ...sharedSettings };
+          for (const tier of ORNAMENT_TIER_ORDER) {
+            const sharedSettingsForTier = mergedSettings[tier];
+            const needsMigration = !sharedSettingsForTier
+              || Object.keys(sharedSettingsForTier).length === 0;
+            if (needsMigration) {
+              const legacySettings = normalizeCardOrnamentSettings(legacyTierOrnamentSettings.current[tier] ?? DEFAULT_CARD_ORNAMENT_SETTINGS);
+              await saveSharedCardOrnamentSettings(tier, legacySettings);
+              mergedSettings[tier] = legacySettings;
+            }
+          }
+          if (!isDisposed) setTierOrnamentSettings(normalizeTierCardOrnamentSettings(mergedSettings));
+        } else {
+          setTierOrnamentSettings(normalizeTierCardOrnamentSettings(sharedSettings));
+        }
+      } catch (error) {
+        console.warn('Não foi possível sincronizar os ornamentos compartilhados das cartas.', error);
+      }
+    };
+    void refreshSharedOrnaments();
+    return () => { isDisposed = true; };
+  }, [currentUser?.role]);
+
+  const handleUpdateTierOrnamentSettings = useCallback(async (tier: EloTier, settings: CardOrnamentSettings) => {
+    setTierOrnamentSettings((previous) => ({ ...previous, [tier]: settings }));
+    await saveSharedCardOrnamentSettings(tier, settings);
+  }, []);
 
   useEffect(() => {
     writeStorage('personas_cards_v2', cards);
@@ -1908,7 +1946,7 @@ export default function App() {
             onTestRole={handleTestRole}
             currentSeason={activeSeason.number}
             ornamentSettingsByTier={tierOrnamentSettings}
-            onUpdateTierOrnamentSettings={(tier, settings) => setTierOrnamentSettings((previous) => ({ ...previous, [tier]: settings }))}
+            onUpdateTierOrnamentSettings={handleUpdateTierOrnamentSettings}
           />
         )}
       </main>

@@ -1,5 +1,5 @@
 import { createClient, type User as AuthUser } from '@supabase/supabase-js';
-import type { Lane, User, UserRole } from '../types';
+import type { CardOrnamentSettings, EloTier, Lane, User, UserRole } from '../types';
 import { INITIAL_USERS } from '../data/initialData';
 import mascotAvatar from '../assets/images/personas_duck_mascot_1793729518059.jpg';
 import { normalizeHandle, normalizeRiotId } from '../utils/userIdentity';
@@ -14,6 +14,38 @@ export const supabase = supabaseUrl && supabaseAnonKey
   : null;
 
 export const isSharedAccountsEnabled = Boolean(supabase);
+
+let cardOrnamentSettingsWriteQueue: Promise<unknown> = Promise.resolve();
+
+export async function loadSharedCardOrnamentSettings(): Promise<Partial<Record<EloTier, Partial<CardOrnamentSettings>>> | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from('card_ornament_settings').select('tier,settings');
+  if (error) throw error;
+  return Object.fromEntries((data || []).map((row) => [row.tier as EloTier, row.settings as Partial<CardOrnamentSettings>]));
+}
+
+export function saveSharedCardOrnamentSettings(tier: EloTier, settings: CardOrnamentSettings): Promise<void> {
+  if (!supabase) return Promise.resolve();
+
+  const save = async () => {
+    const { data: authData, error: authError } = await supabase!.auth.getUser();
+    if (authError || !authData.user) throw authError || new Error('Entre na conta para salvar este padrão de moldura.');
+    const { data, error } = await supabase!.from('card_ornament_settings')
+      .update({ settings, updated_at: new Date().toISOString() })
+      .eq('tier', tier)
+      .select('settings')
+      .single();
+    if (error) throw error;
+    const savedSettings = data.settings as CardOrnamentSettings;
+    if (Object.keys(settings).some((key) => savedSettings[key as keyof CardOrnamentSettings] !== settings[key as keyof CardOrnamentSettings])) {
+      throw new Error('O padrão de moldura não foi sincronizado.');
+    }
+  };
+
+  const queuedSave = cardOrnamentSettingsWriteQueue.then(save, save);
+  cardOrnamentSettingsWriteQueue = queuedSave.then(() => undefined, () => undefined);
+  return queuedSave;
+}
 
 export async function getSupabaseAuthorizationHeaders(): Promise<Record<string, string>> {
   if (!supabase) return {};

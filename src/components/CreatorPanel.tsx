@@ -52,7 +52,7 @@ interface CreatorPanelProps {
   onTestRole: (role: UserRole) => void;
   currentSeason: number;
   ornamentSettingsByTier: TierCardOrnamentSettings;
-  onUpdateTierOrnamentSettings: (tier: EloTier, settings: CardOrnamentSettings) => void;
+  onUpdateTierOrnamentSettings: (tier: EloTier, settings: CardOrnamentSettings) => void | Promise<void>;
 }
 
 export const CreatorPanel: React.FC<CreatorPanelProps> = ({

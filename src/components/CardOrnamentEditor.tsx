@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDownToLine, ArrowUpToLine, Check, Move, RotateCcw, Save, Scaling } from 'lucide-react';
 import { CardItem, CardOrnamentSettings, EloTier, User } from '../types';
 import { DEFAULT_CARD_ORNAMENT_SETTINGS, getTierOrnamentReferenceCard, normalizeCardOrnamentSettings, ORNAMENT_TIER_ORDER, TierCardOrnamentSettings } from '../utils/cardOrnament';
@@ -40,7 +40,7 @@ interface CardOrnamentEditorProps {
   users: User[];
   ornamentSettingsByTier: TierCardOrnamentSettings;
   defaultSettings: CardOrnamentSettings;
-  onSave: (tier: EloTier, settings: CardOrnamentSettings) => void;
+  onSave: (tier: EloTier, settings: CardOrnamentSettings) => void | Promise<void>;
 }
 
 const RangeControl: React.FC<{
@@ -127,7 +127,10 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
   const [previewTier, setPreviewTier] = useState<EloTier>(previewCardsByTier[0]?.tier || 'challenger');
   const [previewMvpMode, setPreviewMvpMode] = useState<'card' | 'without' | 'mvp'>('card');
   const [saved, setSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [hasPendingChanges, setHasPendingChanges] = useState(false);
+  const saveRequestId = useRef(0);
   const previewCard = useMemo(() => previewCardsByTier.find((card) => card.tier === previewTier) || previewCardsByTier[0], [previewCardsByTier, previewTier]);
   const selectedSettings = ornamentSettingsByTier[previewTier] ?? previewCard?.ornamentSettings ?? defaultSettings;
   const [draft, setDraft] = useState<CardOrnamentSettings>(() => normalizeCardOrnamentSettings(selectedSettings));
@@ -141,19 +144,38 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
     setDraft(normalizeCardOrnamentSettings(selectedSettings));
   }, [previewTier, selectedSettings.scale, selectedSettings.heightScale, selectedSettings.topScale, selectedSettings.sideScale, selectedSettings.offsetX, selectedSettings.offsetY, selectedSettings.layer]);
 
+  const persistSettings = useCallback(async (tier: EloTier, settings: CardOrnamentSettings) => {
+    const requestId = ++saveRequestId.current;
+    setIsSaving(true);
+    setSaveError(null);
+    setSaved(false);
+    try {
+      await onSave(tier, settings);
+      if (saveRequestId.current === requestId) {
+        setIsSaving(false);
+        setSaved(true);
+      }
+    } catch (error) {
+      if (saveRequestId.current === requestId) {
+        setIsSaving(false);
+        setSaved(false);
+        setSaveError(error instanceof Error ? error.message : 'Não foi possível salvar o padrão compartilhado.');
+      }
+    }
+  }, [onSave]);
+
   useEffect(() => {
     if (!hasPendingChanges) return;
 
     const tier = previewTier;
     const normalized = normalizeCardOrnamentSettings(draft);
     const timeoutId = window.setTimeout(() => {
-      onSave(tier, normalized);
       setHasPendingChanges(false);
-      setSaved(true);
+      void persistSettings(tier, normalized);
     }, 350);
 
     return () => window.clearTimeout(timeoutId);
-  }, [hasPendingChanges, draft, previewTier, onSave]);
+  }, [hasPendingChanges, draft, previewTier, persistSettings]);
 
   useEffect(() => {
     if (!previewCardsByTier.some((card) => card.tier === previewTier)) setPreviewTier(previewCardsByTier[0]?.tier || 'challenger');
@@ -161,6 +183,7 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
 
   const updateDraft = (partial: Partial<CardOrnamentSettings>) => {
     setSaved(false);
+    setSaveError(null);
     setHasPendingChanges(true);
     setDraft((current) => normalizeCardOrnamentSettings({ ...current, ...partial }));
   };
@@ -169,18 +192,18 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
     const normalized = normalizeCardOrnamentSettings(next);
     setDraft(normalized);
     setHasPendingChanges(false);
-    onSave(previewTier, normalized);
-    setSaved(true);
+    void persistSettings(previewTier, normalized);
   };
 
   const handleSelectTier = (tier: EloTier) => {
     if (hasPendingChanges) {
-      onSave(previewTier, normalizeCardOrnamentSettings(draft));
+      void persistSettings(previewTier, normalizeCardOrnamentSettings(draft));
     }
     setPreviewTier(tier);
     setDraft(normalizeCardOrnamentSettings(ornamentSettingsByTier[tier] ?? defaultSettings));
     setHasPendingChanges(false);
     setSaved(false);
+    setSaveError(null);
   };
 
   return (
@@ -191,7 +214,7 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
           <div>
             <h3 className="font-display text-lg font-black text-white">Editor do ornamento das cartas</h3>
             <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-300">
-              Ajuste o padrão de cada elo. Cada mudança é salva automaticamente e aplicada a todas as cartas daquele elo.
+              Ajuste o padrão de cada elo. Cada mudança é compartilhada e aplicada às cartas atuais e futuras desse elo.
             </p>
           </div>
         </div>
@@ -333,8 +356,8 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
           </fieldset>
 
           <div className="flex flex-col gap-2 sm:flex-row">
-            <p className="self-center text-xs text-slate-400" aria-live="polite">
-              {hasPendingChanges ? 'Salvando automaticamente…' : saved ? 'Alterações salvas automaticamente.' : 'Salvamento automático ativado.'}
+            <p className={`self-center text-xs ${saveError ? 'text-rose-300' : 'text-slate-400'}`} aria-live="polite">
+              {saveError || (hasPendingChanges || isSaving ? 'Sincronizando o padrão…' : saved ? 'Padrão compartilhado salvo.' : 'Sincronização automática ativada.')}
             </p>
             <button
               type="button"
@@ -342,7 +365,7 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
               className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-300"
             >
               {saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-              {saved ? 'Salvo automaticamente' : 'Salvar agora'}
+              {isSaving ? 'Salvando…' : saved ? 'Padrão salvo' : 'Salvar agora'}
             </button>
             <button
               type="button"

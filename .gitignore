@@ -6,5 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+supabase/.temp/
 data/personas-tournament-state.json
 data/*.tmp
