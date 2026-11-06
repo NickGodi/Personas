@@ -1,8 +1,5 @@
-import { parseOcrMatchStats } from '../src/utils/matchStats.ts';
-
 export default {
   fetch() {
-    const parsed = parseOcrMatchStats('{"playerName":"Nick","kills":19,"deaths":9,"assists":5,"minions":330,"gold":23941}');
-    return Response.json({ status: 'ok', parsed });
+    return Response.json({ status: 'ok', app: 'Personas', time: new Date().toISOString() });
   },
 };

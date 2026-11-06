@@ -1,4 +1,4 @@
-import { createApiHandler } from '../server/vercelApi';
+import { createApiHandler } from '../server/vercelApi.ts';
 
 const handler = createApiHandler('tournament-state');
 

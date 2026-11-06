@@ -1,6 +1,6 @@
 import type { User as AuthUser } from '@supabase/supabase-js';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
-import { parseOcrMatchStats } from '../src/utils/matchStats';
+import { parseOcrMatchStats } from '../src/utils/matchStats.ts';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY
@@ -277,7 +277,7 @@ async function dispatch(req: ExpressRequest, res: ExpressResponse) {
       const forwardedFor = typeof headers.get === 'function' ? headers.get('x-forwarded-for') : headers['x-forwarded-for'];
       const forwardedIps = String(forwardedFor || '').split(',');
       const clientIp = forwardedIps[forwardedIps.length - 1]?.trim() || 'unknown';
-      const { signInWithLogin } = await import('./authLogin');
+      const { signInWithLogin } = await import('./authLogin.ts');
       const result = await signInWithLogin(req.body?.login, req.body?.password, clientIp);
       return res.status(result.status).json(result.body);
     }
