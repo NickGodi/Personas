@@ -69,58 +69,6 @@ const OrnamentFrameSlice: React.FC<{
   );
 };
 
-const OrnamentFrameSection: React.FC<{
-  src: string;
-  sourceLeft?: number;
-  sourceRight?: number;
-  sourceTop: number;
-  sourceBottom: number;
-  destinationLeft?: number;
-  destinationRight?: number;
-  destinationTop: number;
-  destinationBottom: number;
-}> = ({
-  src,
-  sourceLeft = 0,
-  sourceRight = 1,
-  sourceTop,
-  sourceBottom,
-  destinationLeft = 0,
-  destinationRight = 1,
-  destinationTop,
-  destinationBottom,
-}) => {
-  const sourceWidth = sourceRight - sourceLeft;
-  const sourceHeight = sourceBottom - sourceTop;
-  const destinationWidth = destinationRight - destinationLeft;
-  const destinationHeight = destinationBottom - destinationTop;
-
-  return (
-    <div
-      className="pointer-events-none absolute overflow-hidden"
-      style={{
-        left: `${destinationLeft * 100}%`,
-        top: `${destinationTop * 100}%`,
-        width: `${destinationWidth * 100}%`,
-        height: `${destinationHeight * 100}%`,
-      }}
-      aria-hidden="true"
-    >
-      <img
-        src={src}
-        alt=""
-        className="absolute object-fill"
-        style={{
-          left: `${(-sourceLeft / sourceWidth) * 100}%`,
-          top: `${(-sourceTop / sourceHeight) * 100}%`,
-          width: `${(1 / sourceWidth) * 100}%`,
-          height: `${(1 / sourceHeight) * 100}%`,
-        }}
-      />
-    </div>
-  );
-};
-
 interface RankedCardProps {
   card: CardItem;
   size?: 'sm' | 'md' | 'lg';
@@ -469,41 +417,8 @@ export const RankedCard: React.FC<RankedCardProps> = ({
 
           </div>
         </div>
-        <div
-          className={`pointer-events-none absolute ${legendOrnamentLayer}`}
-          style={{
-            ...legendOrnamentStyle,
-            ...(activeOrnamentSettings.sideScale < 0.999 ? { filter: legendOrnamentFilter } : {}),
-          }}
-        >
-          {activeOrnamentSettings.sideScale < 0.999 ? (
-            <>
-              <OrnamentFrameSection
-                src={legendFrameSource}
-                sourceLeft={0}
-                sourceRight={0.24}
-                sourceTop={0.2}
-                sourceBottom={0.8}
-                destinationLeft={0}
-                destinationRight={0.24 * activeOrnamentSettings.sideScale}
-                destinationTop={0.2 * activeOrnamentSettings.topScale}
-                destinationBottom={0.8}
-              />
-              <OrnamentFrameSection
-                src={legendFrameSource}
-                sourceLeft={0.76}
-                sourceRight={1}
-                sourceTop={0.2}
-                sourceBottom={0.8}
-                destinationLeft={1 - 0.24 * activeOrnamentSettings.sideScale}
-                destinationRight={1}
-                destinationTop={0.2 * activeOrnamentSettings.topScale}
-                destinationBottom={0.8}
-              />
-              <OrnamentFrameSection src={legendFrameSource} sourceTop={0} sourceBottom={0.27} destinationTop={0} destinationBottom={0.27 * activeOrnamentSettings.topScale} />
-              <OrnamentFrameSection src={legendFrameSource} sourceTop={0.73} sourceBottom={1} destinationTop={0.73} destinationBottom={1} />
-            </>
-          ) : activeOrnamentSettings.topScale >= 0.999 && activeOrnamentSettings.topScale <= 1.001 ? (
+        <div className={`pointer-events-none absolute ${legendOrnamentLayer}`} style={legendOrnamentStyle}>
+          {activeOrnamentSettings.topScale >= 0.999 && activeOrnamentSettings.topScale <= 1.001 ? (
             <img src={legendFrameSource} alt="" aria-hidden="true" className="h-full w-full object-fill" style={{ filter: legendOrnamentFilter }} />
           ) : (
             <>
@@ -539,55 +454,8 @@ export const RankedCard: React.FC<RankedCardProps> = ({
       )}
 
       {/* Front mode places the full ornament over the card details, as requested. */}
-      {/* Side width is controlled by horizontal section bounds only; top, center height, and bottom keep their own settings. */}
-      <div
-        className={`pointer-events-none absolute ${ornamentLayer}`}
-        style={{
-          ...ornamentStyle,
-          ...(activeOrnamentSettings.sideScale < 0.999 ? { filter: ornamentFilter } : {}),
-        }}
-      >
-        {activeOrnamentSettings.sideScale < 0.999 ? (
-          <>
-            {/* Side rails overlap the header/footer cuts so resizing never leaves broken seams. */}
-            <OrnamentFrameSection
-              src={rankCardFrameSource}
-              sourceLeft={0}
-              sourceRight={0.24}
-              sourceTop={0.2}
-              sourceBottom={0.8}
-              destinationLeft={0}
-              destinationRight={0.24 * activeOrnamentSettings.sideScale}
-              destinationTop={0.2 * activeOrnamentSettings.topScale}
-              destinationBottom={0.8}
-            />
-            <OrnamentFrameSection
-              src={rankCardFrameSource}
-              sourceLeft={0.76}
-              sourceRight={1}
-              sourceTop={0.2}
-              sourceBottom={0.8}
-              destinationLeft={1 - 0.24 * activeOrnamentSettings.sideScale}
-              destinationRight={1}
-              destinationTop={0.2 * activeOrnamentSettings.topScale}
-              destinationBottom={0.8}
-            />
-            <OrnamentFrameSection
-              src={rankCardFrameSource}
-              sourceTop={0}
-              sourceBottom={0.27}
-              destinationTop={0}
-              destinationBottom={0.27 * activeOrnamentSettings.topScale}
-            />
-            <OrnamentFrameSection
-              src={rankCardFrameSource}
-              sourceTop={0.73}
-              sourceBottom={1}
-              destinationTop={0.73}
-              destinationBottom={1}
-            />
-          </>
-        ) : activeOrnamentSettings.topScale >= 0.999 && activeOrnamentSettings.topScale <= 1.001 ? (
+      <div className={`pointer-events-none absolute ${ornamentLayer}`} style={ornamentStyle}>
+        {activeOrnamentSettings.topScale >= 0.999 && activeOrnamentSettings.topScale <= 1.001 ? (
           <img
             src={rankCardFrameSource}
             alt=""

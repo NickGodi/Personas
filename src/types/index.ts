@@ -25,8 +25,6 @@ export interface CardOrnamentSettings {
   heightScale: number;
   /** Independent height multiplier for only the upper ornament section. */
   topScale: number;
-  /** Independent horizontal width multiplier for the left and right side rails; does not change their height. */
-  sideScale: number;
   /** Horizontal frame offset as a percentage of the frame bounds. */
   offsetX: number;
   /** Vertical frame offset as a percentage of the frame bounds. */

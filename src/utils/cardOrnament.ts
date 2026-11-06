@@ -17,7 +17,6 @@ export const DEFAULT_CARD_ORNAMENT_SETTINGS: CardOrnamentSettings = {
   scale: 1,
   heightScale: 1,
   topScale: 0.8,
-  sideScale: 1,
   offsetX: 0,
   offsetY: 0,
   layer: 'front',
@@ -93,7 +92,6 @@ export function normalizeCardOrnamentSettings(
   const scale = Number(value?.scale);
   const heightScale = Number(value?.heightScale);
   const topScale = Number(value?.topScale);
-  const sideScale = Number(value?.sideScale);
   const offsetX = Number(value?.offsetX);
   const offsetY = Number(value?.offsetY);
 
@@ -101,7 +99,6 @@ export function normalizeCardOrnamentSettings(
     scale: Number.isFinite(scale) ? Math.min(1.8, Math.max(0.8, scale)) : DEFAULT_CARD_ORNAMENT_SETTINGS.scale,
     heightScale: Number.isFinite(heightScale) ? Math.min(1.8, Math.max(0.8, heightScale)) : DEFAULT_CARD_ORNAMENT_SETTINGS.heightScale,
     topScale: Number.isFinite(topScale) ? Math.min(3, Math.max(0.7, topScale)) : DEFAULT_CARD_ORNAMENT_SETTINGS.topScale,
-    sideScale: Number.isFinite(sideScale) ? Math.min(1.5, Math.max(0.25, sideScale)) : DEFAULT_CARD_ORNAMENT_SETTINGS.sideScale,
     offsetX: Number.isFinite(offsetX) ? Math.min(15, Math.max(-15, offsetX)) : DEFAULT_CARD_ORNAMENT_SETTINGS.offsetX,
     offsetY: Number.isFinite(offsetY) ? Math.min(15, Math.max(-15, offsetY)) : DEFAULT_CARD_ORNAMENT_SETTINGS.offsetY,
     layer: value?.layer === 'back' ? 'back' : 'front',

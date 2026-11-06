@@ -142,7 +142,7 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
 
   useEffect(() => {
     setDraft(normalizeCardOrnamentSettings(selectedSettings));
-  }, [previewTier, selectedSettings.scale, selectedSettings.heightScale, selectedSettings.topScale, selectedSettings.sideScale, selectedSettings.offsetX, selectedSettings.offsetY, selectedSettings.layer]);
+  }, [previewTier, selectedSettings.scale, selectedSettings.heightScale, selectedSettings.topScale, selectedSettings.offsetX, selectedSettings.offsetY, selectedSettings.layer]);
 
   const persistSettings = useCallback(async (tier: EloTier, settings: CardOrnamentSettings) => {
     const requestId = ++saveRequestId.current;
@@ -221,7 +221,7 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
       </header>
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(320px,1fr)_minmax(340px,1.15fr)]">
-        <div className="flex min-h-[540px] flex-col items-center justify-center gap-4 overflow-hidden rounded-2xl border border-slate-800 bg-[radial-gradient(ellipse_at_center,_rgba(30,41,59,0.8),_rgba(2,6,23,0.98)_72%)] px-5 py-8 sm:px-12 sm:py-10">
+        <div className="flex min-h-[540px] flex-col items-center justify-center gap-4 overflow-hidden rounded-2xl border border-amber-400/20 bg-[radial-gradient(ellipse_at_center,_rgba(30,41,59,0.8),_rgba(2,6,23,0.98)_72%)] px-5 py-8 shadow-xl shadow-black/20 sm:px-12 sm:py-10 xl:sticky xl:top-20 xl:z-10 xl:self-start">
           <span className="rounded-full border border-amber-400/30 bg-slate-950/80 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-amber-200">Prévia · {TIER_LABELS[previewTier] || previewTier}</span>
           {previewCard ? (
             <RankedCard card={previewCardVariant!} size="md" ornamentSettings={draft} />
@@ -300,17 +300,6 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
               displayValue={`${Math.round(draft.topScale * 100)}%`}
               description="100% é a altura original; ajuste para reduzir ou ampliar só o topo."
               onChange={(topScale) => updateDraft({ topScale })}
-            />
-            <RangeControl
-              label="Largura das laterais — somente horizontal"
-              value={draft.sideScale}
-              min={0.25}
-              max={1.5}
-              step={0.01}
-              displayValue={`${Math.round(draft.sideScale * 100)}%`}
-              percentageInput
-              description="Ajuste de 25% a 150%. Altera só a largura das laterais; altura, topo e base ficam intactos."
-              onChange={(sideScale) => updateDraft({ sideScale })}
             />
             <RangeControl
               label="Mover para os lados"
