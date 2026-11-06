@@ -1,4 +1,4 @@
-import { parseOcrMatchStats } from '../src/utils/matchStats';
+import { parseOcrMatchStats } from '../src/utils/matchStats.ts';
 
 export default {
   fetch() {
