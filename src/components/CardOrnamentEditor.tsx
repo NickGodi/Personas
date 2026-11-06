@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowUpToLine, Check, Eye, EyeOff, Move, RotateCcw, Save, Scaling } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpToLine, Eye, EyeOff, Move, RotateCcw, Scaling } from 'lucide-react';
 import { CardItem, CardOrnamentSettings, EloTier, User } from '../types';
 import { DEFAULT_CARD_ORNAMENT_SETTINGS, getTierOrnamentReferenceCard, normalizeCardOrnamentSettings, ORNAMENT_TIER_ORDER, TierCardOrnamentSettings } from '../utils/cardOrnament';
 import { RankedCard } from './RankedCard';
@@ -126,8 +126,6 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
     .map((tier) => getTierOrnamentReferenceCard(cardsWithOrnament, tier) ?? createPreviewCard(tier, users[0])), [cardsWithOrnament, users]);
   const [previewTier, setPreviewTier] = useState<EloTier>(previewCardsByTier[0]?.tier || 'challenger');
   const [previewMvpMode, setPreviewMvpMode] = useState<'card' | 'without' | 'mvp'>('card');
-  const [saved, setSaved] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [hasPendingChanges, setHasPendingChanges] = useState(false);
   const saveRequestId = useRef(0);
@@ -146,19 +144,11 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
 
   const persistSettings = useCallback(async (tier: EloTier, settings: CardOrnamentSettings) => {
     const requestId = ++saveRequestId.current;
-    setIsSaving(true);
     setSaveError(null);
-    setSaved(false);
     try {
       await onSave(tier, settings);
-      if (saveRequestId.current === requestId) {
-        setIsSaving(false);
-        setSaved(true);
-      }
     } catch (error) {
       if (saveRequestId.current === requestId) {
-        setIsSaving(false);
-        setSaved(false);
         setSaveError(error instanceof Error ? error.message : 'Não foi possível salvar o padrão compartilhado.');
       }
     }
@@ -182,7 +172,6 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
   }, [previewCardsByTier, previewTier]);
 
   const updateDraft = (partial: Partial<CardOrnamentSettings>) => {
-    setSaved(false);
     setSaveError(null);
     setHasPendingChanges(true);
     setDraft((current) => normalizeCardOrnamentSettings({ ...current, ...partial }));
@@ -202,7 +191,6 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
     setPreviewTier(tier);
     setDraft(normalizeCardOrnamentSettings(ornamentSettingsByTier[tier] ?? defaultSettings));
     setHasPendingChanges(false);
-    setSaved(false);
     setSaveError(null);
   };
 
@@ -368,18 +356,8 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
             </button>
           </div>
 
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <p className={`self-center text-xs ${saveError ? 'text-rose-300' : 'text-slate-400'}`} aria-live="polite">
-              {saveError || (hasPendingChanges || isSaving ? 'Sincronizando o padrão…' : saved ? 'Padrão compartilhado salvo.' : 'Sincronização automática ativada.')}
-            </p>
-            <button
-              type="button"
-              onClick={() => saveSettings()}
-              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-400 px-4 py-3 text-sm font-black text-slate-950 shadow-lg shadow-amber-950/30 transition hover:bg-amber-300"
-            >
-              {saved ? <Check className="h-4 w-4" /> : <Save className="h-4 w-4" />}
-              {isSaving ? 'Salvando…' : saved ? 'Padrão salvo' : 'Salvar agora'}
-            </button>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+            {saveError && <p className="flex-1 text-xs text-rose-300" aria-live="polite">{saveError}</p>}
             <button
               type="button"
               onClick={() => saveSettings({ ...DEFAULT_CARD_ORNAMENT_SETTINGS, showFrame: previewTier !== 'lenda' })}
