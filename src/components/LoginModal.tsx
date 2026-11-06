@@ -18,10 +18,10 @@ const inputClass = 'w-full rounded-xl border border-slate-700 bg-slate-900 px-3 
 
 export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, onLoginSuccess }) => {
   const [mode, setMode] = useState<Mode>('login');
+  const [login, setLogin] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
-  const [handle, setHandle] = useState('');
   const [riotId, setRiotId] = useState('');
   const [primaryLane, setPrimaryLane] = useState<User['primaryLane']>('PREENCHER');
   const [error, setError] = useState<string | null>(null);
@@ -41,23 +41,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, 
     setError(null);
     setNotice(null);
     if (!supabase) {
-      setError('O cadastro compartilhado ainda não está configurado. Configure as variáveis do Supabase para habilitar o acesso.');
+      setError('O login não está disponível neste endereço local porque ele não está conectado ao sistema de contas.');
       return;
     }
 
     setLoading(true);
     try {
-      const { data, error: authError } = await supabase.auth.signInWithPassword({
-        email: normalizeEmail(email),
-        password,
+      const { data: result, error: invokeError } = await supabase.functions.invoke('auth-login', {
+        body: { login: login.trim(), password },
       });
-      if (authError || !data.user) throw authError || new Error('Não foi possível entrar.');
+      if (invokeError) throw new Error('Não foi possível entrar agora. Confira seu login e tente novamente.');
+      if (!result?.session) throw new Error(result?.error || 'Login ou senha inválidos.');
+      const { data, error: sessionError } = await supabase.auth.setSession(result.session);
+      if (sessionError || !data.user) throw sessionError || new Error('Não foi possível entrar.');
       const user = await loadAuthenticatedProfile(data.user);
       sound.playVictory();
       onLoginSuccess(user);
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'E-mail ou senha inválidos.');
+      setError(caught instanceof Error ? caught.message : 'Login ou senha inválidos.');
     } finally {
       setLoading(false);
     }
@@ -68,17 +70,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, 
     setError(null);
     setNotice(null);
     if (!isSharedAccountsEnabled || !supabase) {
-      setError('O cadastro compartilhado ainda não está configurado. Configure as variáveis do Supabase para habilitar o acesso.');
+      setError('O cadastro não está disponível neste endereço local porque ele não está conectado ao sistema de contas.');
       return;
     }
 
-    const normalizedHandle = normalizeHandle(handle);
+    const normalizedHandle = normalizeHandle(login);
+    const normalizedLogin = normalizedHandle.slice(1);
     const normalizedEmail = normalizeEmail(email);
     const normalizedRiotId = normalizeRiotId(riotId);
     if (name.trim().length < 2) return setError('Informe seu nome no site.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return setError('Informe um e-mail válido.');
-    if (!/^[a-z0-9._-]{2,24}$/.test(normalizedHandle.slice(1))) {
-      return setError('O @ deve ter de 2 a 24 caracteres: letras, números, ponto, hífen ou sublinhado.');
+    if (!/^[a-z0-9._-]{2,24}$/.test(normalizedLogin)) {
+      return setError('O login deve ter de 2 a 24 caracteres: letras, números, ponto, hífen ou sublinhado.');
     }
     if (!normalizedRiotId || !normalizedRiotId.includes('#')) return setError('Informe seu Riot ID no formato Nome#TAG.');
     if (password.length < 8) return setError('A senha precisa ter pelo menos 8 caracteres.');
@@ -92,8 +95,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, 
     };
     const creatorId = users.find((user) => user.role === 'criador')?.id || '';
     const identityError = validateUniqueUserIdentity(users, candidate, creatorId);
-    // @nick is protected by the database: only the e-mail configured by the site owner can claim it.
-    if (identityError && normalizedHandle !== '@nick') return setError(identityError);
+    // The database trigger restricts this reserved profile to the configured creator e-mail.
+    if (identityError && normalizedHandle !== '@nick') {
+      return setError(identityError
+        .replace(/O @([^ ]+) já pertence/, 'O login "$1" já pertence')
+        .replace('Escolha outro @.', 'Escolha outro login.')
+        .replace('Esse login é reservado à conta do criador.', 'Esse login é reservado à conta do criador.'));
+    }
 
     setLoading(true);
     try {
@@ -105,6 +113,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, 
           data: {
             name: name.trim(),
             handle: normalizedHandle,
+            login: normalizedLogin,
             riot_id: normalizedRiotId,
             primary_lane: primaryLane,
           },
@@ -112,7 +121,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, 
       });
       if (authError) {
         if (authError.code === '23505' || /duplicate|already|reserved|pertence/i.test(authError.message)) {
-          throw new Error('Esse @ ou Riot ID já está em uso ou pertence a um perfil oficial.');
+          throw new Error('Esse login ou Riot ID já está em uso ou pertence a um perfil oficial.');
         }
         throw authError;
       }
@@ -145,7 +154,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, 
             <Crown className="h-6 w-6" />
           </div>
           <h2 id="auth-title" className="font-display text-xl font-black text-white">{mode === 'login' ? 'Login Personas' : 'Criar conta'}</h2>
-          <p className="mt-1 text-xs text-slate-400">{mode === 'login' ? 'Entre com o e-mail da sua conta.' : 'Seu perfil ficará disponível para toda a comunidade.'}</p>
+          <p className="mt-1 text-xs text-slate-400">{mode === 'login' ? 'Entre com seu login e senha.' : 'Seu perfil ficará disponível para toda a comunidade.'}</p>
         </div>
 
         <div className="mb-5 grid grid-cols-2 gap-2 rounded-xl border border-slate-800 bg-slate-900/70 p-1">
@@ -155,7 +164,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, 
 
         {!isSharedAccountsEnabled && (
           <div className="mb-4 rounded-xl border border-amber-700/50 bg-amber-950/30 p-3 text-xs leading-relaxed text-amber-200">
-            O cadastro compartilhado será habilitado quando o projeto Supabase for conectado.
+            Este endereço local ainda não está conectado ao sistema de contas. Login e cadastro só funcionam em um ambiente configurado.
           </div>
         )}
         {error && <div role="alert" className="mb-4 flex items-start gap-2 rounded-xl border border-red-600/60 bg-red-950/60 p-3 text-xs text-red-200"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" /><span>{error}</span></div>}
@@ -163,10 +172,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, 
 
         <form onSubmit={mode === 'login' ? handleLogin : handleRegister} className="space-y-3.5">
           {mode === 'register' && <>
-            <label className="block text-xs font-semibold text-slate-300">Nome no site<input className={`${inputClass} mt-1`} value={name} onChange={(event) => setName(event.target.value)} maxLength={48} autoComplete="name" required /></label>
-            <label className="block text-xs font-semibold text-slate-300">Seu @<input className={`${inputClass} mt-1 font-mono`} value={handle} onChange={(event) => setHandle(event.target.value)} placeholder="@seunick" maxLength={25} autoComplete="username" required /></label>
+            <label className="block text-xs font-semibold text-slate-300">Nome<input className={`${inputClass} mt-1`} value={name} onChange={(event) => setName(event.target.value)} maxLength={48} autoComplete="name" required /></label>
+            <label className="block text-xs font-semibold text-slate-300">Login<input className={`${inputClass} mt-1`} value={login} onChange={(event) => setLogin(event.target.value)} placeholder="Escolha seu login" maxLength={24} autoComplete="username" required /></label>
           </>}
-          <label className="block text-xs font-semibold text-slate-300">{mode === 'login' ? 'E-mail cadastrado' : 'E-mail'}<input type="email" className={`${inputClass} mt-1`} value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>
+          {mode === 'login'
+            ? <label className="block text-xs font-semibold text-slate-300">Login<input className={`${inputClass} mt-1`} value={login} onChange={(event) => setLogin(event.target.value)} placeholder="Seu login" autoComplete="username" required /></label>
+            : <label className="block text-xs font-semibold text-slate-300">E-mail<input type="email" className={`${inputClass} mt-1`} value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required /></label>}
           {mode === 'register' && <>
             <label className="block text-xs font-semibold text-slate-300">Riot ID<input className={`${inputClass} mt-1`} value={riotId} onChange={(event) => setRiotId(event.target.value)} placeholder="Nome#TAG" maxLength={32} required /></label>
             <label className="block text-xs font-semibold text-slate-300">Rota principal<select className={`${inputClass} mt-1`} value={primaryLane} onChange={(event) => setPrimaryLane(event.target.value as User['primaryLane'])}><option value="PREENCHER">Preencher</option><option value="TOP">Top</option><option value="JUNGLE">Jungle</option><option value="MID">Mid</option><option value="ADC">ADC</option><option value="SUPORTE">Suporte</option></select></label>

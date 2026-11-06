@@ -1,6 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { createClient, type User as AuthUser } from '@supabase/supabase-js';
 import type { Request, Response } from 'express';
+import { signInWithLogin } from '../server/authLogin';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY
@@ -239,6 +240,12 @@ async function handleOcr(req: Request, res: Response) {
 
 export default async function handler(req: Request, res: Response) {
   const route = Array.isArray(req.query.path) ? req.query.path.join('/') : String(req.query.path || '');
+  if (route === 'auth/login' && req.method === 'POST') {
+    const forwardedIps = String(req.headers['x-forwarded-for'] || '').split(',');
+    const clientIp = forwardedIps[forwardedIps.length - 1]?.trim() || 'unknown';
+    const result = await signInWithLogin(req.body?.login, req.body?.password, clientIp);
+    return res.status(result.status).json(result.body);
+  }
   if (route === 'tournament-state') return handleTournament(req, res);
   if (route === 'presence') return handlePresence(req, res);
   if (route === 'ocr' && req.method === 'POST') return handleOcr(req, res);

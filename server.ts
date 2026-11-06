@@ -2,6 +2,7 @@ import express from 'express';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { signInWithLogin } from './server/authLogin';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -59,6 +60,11 @@ async function startServer() {
 
   // Base64 grows the image by about one third; this covers the 15 MB upload limit.
   app.use(express.json({ limit: '22mb' }));
+
+  app.post('/api/auth/login', async (req, res) => {
+    const result = await signInWithLogin(req.body?.login, req.body?.password, req.ip || 'local');
+    return res.status(result.status).json(result.body);
+  });
 
   // Presence is session based; old heartbeats expire if a tab closes unexpectedly.
   app.get('/api/presence', (_req, res) => {
