@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { parseOcrMatchStats } from './src/utils/matchStats';
+import { generateOcrWithFallback, getGeminiOcrError } from './server/geminiOcr';
 import { signInWithLogin } from './server/authLogin';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -251,8 +252,8 @@ Responda somente um objeto JSON válido, sem Markdown, no formato:
 {"playerName":"nome exatamente como aparece","kills":0,"deaths":0,"assists":0,"minions":0,"gold":0,"notes":""}
 Interprete o KDA como abates/mortes/assistências, nesta ordem. Minions é o total de tropas abatidas (CS). Gold é ouro total. Retorne todos os números como inteiros sem separadores de milhar (por exemplo, ouro 23.941 vira 23941). Se um dado não estiver legível ou visível, retorne null para esse campo. Não adivinhe e não invente valores. O nome deve ser o nome do jogador visível na linha escolhida; se não estiver legível, use null.`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
+      const response = await generateOcrWithFallback((model) => ai.models.generateContent({
+        model,
         contents: [
           {
             role: 'user',
@@ -267,15 +268,15 @@ Interprete o KDA como abates/mortes/assistências, nesta ordem. Minions é o tot
             ]
           }
         ]
-      });
+      }));
 
       const text = response.text || '';
       const data = parseOcrMatchStats(text);
       return res.json({ success: true, source: 'gemini_vision', data });
     } catch (err: unknown) {
       console.error('Erro no OCR:', err);
-      const message = err instanceof Error ? err.message : 'Não foi possível processar o print.';
-      return res.status(502).json({ success: false, error: message });
+      const result = getGeminiOcrError(err);
+      return res.status(result.status).json({ success: false, error: result.message });
     }
   });
 

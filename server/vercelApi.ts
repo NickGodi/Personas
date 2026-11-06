@@ -1,6 +1,7 @@
 import type { User as AuthUser } from '@supabase/supabase-js';
 import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import { parseOcrMatchStats } from '../src/utils/matchStats.ts';
+import { generateOcrWithFallback, getGeminiOcrError } from './geminiOcr.ts';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY
@@ -257,15 +258,15 @@ async function handleOcr(req: ExpressRequest, res: ExpressResponse) {
 Responda somente um objeto JSON válido, sem Markdown, no formato:
 {"playerName":"nome exatamente como aparece","kills":0,"deaths":0,"assists":0,"minions":0,"gold":0,"notes":""}
 Interprete o KDA como abates/mortes/assistências, nesta ordem. Minions é o total de tropas abatidas (CS). Gold é ouro total. Retorne todos os números como inteiros sem separadores de milhar (por exemplo, ouro 23.941 vira 23941). Se um dado não estiver legível ou visível, retorne null para esse campo. Não adivinhe e não invente valores. O nome deve ser o nome do jogador visível na linha escolhida; se não estiver legível, use null.`;
-    const response = await ai.models.generateContent({ model: 'gemini-3.8-flash', contents: [{ role: 'user', parts: [
+    const response = await generateOcrWithFallback((model) => ai.models.generateContent({ model, contents: [{ role: 'user', parts: [
       { text: prompt }, { inlineData: { data: cleanBase64, mimeType } },
-    ] }] });
+    ] }] }));
     const data = parseOcrMatchStats(response.text || '');
     return res.status(200).json({ success: true, source: 'gemini_vision', data });
   } catch (error) {
     console.error('Falha no OCR:', error);
-    const message = error instanceof Error ? error.message : 'Não foi possível processar a imagem.';
-    return responseError(res, 502, message);
+    const result = getGeminiOcrError(error);
+    return responseError(res, result.status, result.message);
   }
 }
 
