@@ -277,7 +277,7 @@ async function dispatch(req: ExpressRequest, res: ExpressResponse) {
       const forwardedFor = typeof headers.get === 'function' ? headers.get('x-forwarded-for') : headers['x-forwarded-for'];
       const forwardedIps = String(forwardedFor || '').split(',');
       const clientIp = forwardedIps[forwardedIps.length - 1]?.trim() || 'unknown';
-      const { signInWithLogin } = await import('../server/authLogin');
+      const { signInWithLogin } = await import('./authLogin');
       const result = await signInWithLogin(req.body?.login, req.body?.password, clientIp);
       return res.status(result.status).json(result.body);
     }
@@ -292,11 +292,12 @@ async function dispatch(req: ExpressRequest, res: ExpressResponse) {
   }
 }
 
-export default {
-  async fetch(request: Request): Promise<Response> {
+export function createApiHandler(routeOverride?: string) {
+  return {
+    async fetch(request: Request): Promise<Response> {
     try {
       const url = new URL(request.url);
-      const route = url.pathname.replace(/^\/api\/?/, '');
+      const route = routeOverride || url.pathname.replace(/^\/api\/?/, '');
       const query = Object.fromEntries(url.searchParams.entries());
       const body = request.method === 'GET' || request.method === 'HEAD'
         ? undefined
@@ -325,5 +326,6 @@ export default {
         headers: { 'content-type': 'application/json; charset=utf-8' },
       });
     }
-  },
-};
+    },
+  };
+}
