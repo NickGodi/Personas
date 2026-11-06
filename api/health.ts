@@ -1,5 +1,3 @@
-export default {
-  fetch() {
-    return Response.json({ status: 'ok', app: 'Personas', time: new Date().toISOString() });
-  },
-};
+import { createApiHandler } from '../server/vercelApi';
+
+export default createApiHandler('health');
