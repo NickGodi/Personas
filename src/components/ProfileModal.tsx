@@ -36,7 +36,7 @@ interface ProfileModalProps {
   onImpersonateUser: (user: User) => void;
   onResetRating: (userId: string) => void;
   canDeleteComments: boolean;
-  onUpdateProfile: (updated: Partial<User>) => string | null;
+  onUpdateProfile: (updated: Partial<User>) => string | null | Promise<string | null>;
   onCastVote: (vote: { targetUserId: string; score: number; comment?: string }) => void;
   onAddComment: (targetUserId: string, text: string) => void;
   onDeleteComment: (targetUserId: string, commentId: string) => void;
@@ -98,6 +98,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [commentInput, setCommentInput] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
   const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
+  const [profileSaving, setProfileSaving] = useState(false);
   const [avatarLoading, setAvatarLoading] = useState(false);
   const avatarFileInput = useRef<HTMLInputElement>(null);
 
@@ -131,18 +132,26 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const normalizedHandle = `@${handle.trim().replace(/^@+/, '')}`;
     if (normalizedHandle.length < 2) {
       setProfileSaveError('Informe um @ válido para seu perfil.');
       return;
     }
-    const saveError = onUpdateProfile({ name, handle: normalizedHandle, email: email.trim().toLowerCase(), avatar: avatar.trim() || user.avatar, bio, favoriteChampion, primaryLane, riotId });
-    if (saveError) {
-      setProfileSaveError(saveError);
-      return;
+    setProfileSaveError(null);
+    setProfileSaving(true);
+    try {
+      const saveError = await onUpdateProfile({ name, handle: normalizedHandle, email: email.trim().toLowerCase(), avatar: avatar.trim() || user.avatar, bio, favoriteChampion, primaryLane, riotId });
+      if (saveError) {
+        setProfileSaveError(saveError);
+        return;
+      }
+      onClose();
+    } catch (error) {
+      setProfileSaveError(error instanceof Error ? error.message : 'Não foi possível salvar o perfil.');
+    } finally {
+      setProfileSaving(false);
     }
-    onClose();
   };
 
   const handleAvatarFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -342,8 +351,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               </label>
               {profileSaveError && <p role="alert" className="text-xs text-amber-300">{profileSaveError}</p>}
               <div className="flex justify-end">
-                <button type="button" onClick={handleSave} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg transition hover:from-red-500 hover:to-rose-500">
-                  <Save className="h-4 w-4" /> Salvar perfil
+                <button type="button" onClick={() => void handleSave()} disabled={profileSaving} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg transition hover:from-red-500 hover:to-rose-500 disabled:cursor-wait disabled:opacity-60">
+                  <Save className="h-4 w-4" /> {profileSaving ? 'Salvando perfil…' : 'Salvar perfil'}
                 </button>
               </div>
             </div>

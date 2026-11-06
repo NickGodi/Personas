@@ -476,7 +476,9 @@ export default function App() {
       return false;
     }
   })();
-  const startsAsLocalCreator = isLocalPreview && !hasLoggedOutOfLocalPreview;
+  // Once Supabase is configured, a local dev preview is not a signed-in account.
+  // Require the real session so profile edits can be saved under the owner's identity.
+  const startsAsLocalCreator = isLocalPreview && !supabase && !hasLoggedOutOfLocalPreview;
   const [currentUser, setCurrentUser] = useState<User | null>(() => startsAsLocalCreator ? creatorUser : null);
   const [isCreatorSession, setIsCreatorSession] = useState(startsAsLocalCreator);
   const [isImpersonating, setIsImpersonating] = useState<boolean>(false);
@@ -1054,23 +1056,57 @@ export default function App() {
     setIsImpersonating(false);
   };
 
-  const handleUpdateUser = (updated: User): string | null => {
-    const normalized = {
+  const prepareUserUpdate = (updated: User) => {
+    const existing = users.find((user) => user.id === updated.id)
+      || users.find((user) => normalizeHandle(user.handle) === normalizeHandle(updated.handle));
+    const previousHandle = normalizeHandle(existing?.handle || updated.handle);
+    const normalized: User = {
       ...updated,
+      id: existing?.id || updated.id,
       handle: normalizeHandle(updated.handle),
       email: normalizeEmail(updated.email) || undefined,
       riotId: updated.riotId.trim(),
       stats: normalizeStats(updated.stats),
     };
-    const identityError = validateUniqueUserIdentity(users, normalized, creatorUser.id);
-    if (identityError) return identityError;
+    return {
+      normalized,
+      previousHandle,
+      existing,
+      identityError: validateUniqueUserIdentity(users, normalized, creatorUser.id),
+    };
+  };
 
-    setUsers((previous) => previous.map((user) => user.id === normalized.id ? normalized : user));
+  const applyUserUpdate = (normalized: User, previousHandle: string) => {
+    const matchesUpdatedUser = (user: User) =>
+      user.id === normalized.id || normalizeHandle(user.handle) === previousHandle;
+    const updateComments = (comments: User['comments']) => (comments || []).map((comment) =>
+      comment.authorId === normalized.id || normalizeHandle(comment.authorHandle) === previousHandle
+        ? {
+            ...comment,
+            authorId: normalized.id,
+            authorName: normalized.name,
+            authorHandle: normalized.handle,
+            authorAvatar: normalized.avatar,
+          }
+        : comment,
+    );
+
+    setUsers((previous) => {
+      const found = previous.some(matchesUpdatedUser);
+      const updatedUsers = previous.map((user) => ({
+        ...(matchesUpdatedUser(user) ? { ...user, ...normalized, id: user.id } : user),
+        comments: updateComments(user.comments),
+      }));
+      return found
+        ? updatedUsers
+        : [...updatedUsers, { ...normalized, comments: updateComments(normalized.comments) }];
+    });
     setCards((previous) => previous.map((card) => {
-      if (card.userId !== normalized.id) return card;
+      if (card.userId !== normalized.id && normalizeHandle(card.userHandle) !== previousHandle) return card;
       const isCurrentSeason = card.season === activeSeason.number;
       return {
         ...card,
+        userId: normalized.id,
         userName: normalized.name,
         userHandle: normalized.handle,
         userAvatar: normalized.avatar,
@@ -1084,12 +1120,62 @@ export default function App() {
         } : {}),
       };
     }));
-    setTeams((previous) => previous.map((team) => team.captainId === normalized.id ? { ...team, captainName: normalized.name } : team));
-    setCurrentUser((previous) => previous?.id === normalized.id ? normalized : previous);
-    setProfileModalTarget((previous) => previous?.id === normalized.id ? normalized : previous);
-    if (!isImpersonating && currentUser?.id === normalized.id) {
+    setTeams((previous) => previous.map((team) => team.captainId === normalized.id
+      ? { ...team, captainName: normalized.name }
+      : team));
+    setChatMessages((previous) => previous.map((message) =>
+      message.senderId === normalized.id || normalizeHandle(message.senderHandle) === previousHandle
+        ? {
+            ...message,
+            senderId: normalized.id,
+            senderName: normalized.name,
+            senderHandle: normalized.handle,
+            senderAvatar: normalized.avatar,
+          }
+        : message,
+    ));
+    setCurrentUser((previous) => previous && matchesUpdatedUser(previous) ? { ...normalized } : previous);
+    setProfileModalTarget((previous) => previous && matchesUpdatedUser(previous) ? { ...normalized } : previous);
+  };
+
+  const isCurrentAccount = (user: User, previousHandle: string) =>
+    !isImpersonating && Boolean(currentUser && (
+      currentUser.id === user.id || normalizeHandle(currentUser.handle) === previousHandle
+    ));
+
+  const handleUpdateUser = (updated: User): string | null => {
+    const { normalized, previousHandle, identityError } = prepareUserUpdate(updated);
+    if (identityError) return identityError;
+
+    applyUserUpdate(normalized, previousHandle);
+    if (isCurrentAccount(normalized, previousHandle)) {
       void saveAuthenticatedProfile(normalized).catch((error) => console.error('Não foi possível sincronizar o perfil compartilhado.', error));
     }
+    return null;
+  };
+
+  const handleSaveProfile = async (updated: Partial<User>): Promise<string | null> => {
+    const profile = (profileModalTarget && (
+      users.find((user) => user.id === profileModalTarget.id)
+      || users.find((user) => normalizeHandle(user.handle) === normalizeHandle(profileModalTarget.handle))
+    )) || profileModalTarget;
+    if (!profile) return 'Não foi possível localizar esse perfil.';
+
+    const { normalized, previousHandle, identityError } = prepareUserUpdate({ ...profile, ...updated });
+    if (identityError) return identityError;
+
+    if (isCurrentAccount(normalized, previousHandle)) {
+      try {
+        await saveAuthenticatedProfile(normalized);
+      } catch (error) {
+        console.error('Não foi possível salvar o perfil no Supabase.', error);
+        return error instanceof Error && /Entre na conta/.test(error.message)
+          ? 'Entre na sua conta Personas para salvar a foto e sincronizá-la em todas as telas.'
+          : 'Não foi possível salvar a foto no Supabase. Confira a conexão e tente novamente.';
+      }
+    }
+
+    applyUserUpdate(normalized, previousHandle);
     return null;
   };
 
@@ -1870,10 +1956,7 @@ export default function App() {
           canResetRatings={canAccessCreatorPanel}
           onImpersonateUser={handleImpersonateUser}
           onResetRating={(userId) => handleResetSeasonRatings(userId)}
-          onUpdateProfile={(updatedPartial) => {
-            const activeProfileUser = users.find((user) => user.id === profileModalTarget.id) || profileModalTarget;
-            return handleUpdateUser({ ...activeProfileUser, ...updatedPartial });
-          }}
+          onUpdateProfile={handleSaveProfile}
           onOpenReportModal={(target) => {
             setProfileModalTarget(null);
             setReportModalTarget(target);

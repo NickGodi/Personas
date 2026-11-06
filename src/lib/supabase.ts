@@ -84,7 +84,7 @@ export async function saveAuthenticatedProfile(user: User): Promise<void> {
   if (!supabase) return;
   const { data, error: authError } = await supabase.auth.getUser();
   if (authError || !data.user) throw authError || new Error('Entre na conta para salvar o perfil.');
-  const { error } = await supabase.from('profiles').update({
+  const { data: savedProfile, error } = await supabase.from('profiles').update({
     name: user.name.trim(),
     handle: normalizeHandle(user.handle),
     avatar: user.avatar,
@@ -92,8 +92,9 @@ export async function saveAuthenticatedProfile(user: User): Promise<void> {
     favorite_champion: user.favoriteChampion,
     primary_lane: user.primaryLane,
     riot_id: normalizeRiotId(user.riotId),
-  }).eq('id', data.user.id);
+  }).eq('id', data.user.id).select('id, avatar').single();
   if (error) throw error;
+  if (savedProfile.avatar !== user.avatar) throw new Error('A foto do perfil não foi sincronizada.');
 }
 
 export function mergeRegisteredProfiles(users: User[], profiles: User[]): User[] {

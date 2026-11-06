@@ -3,10 +3,10 @@ import { createClient } from '@supabase/supabase-js';
 let serverConfig: {
   supabaseUrl: string;
   anonKey: string;
-  admin: ReturnType<typeof createClient> | null;
+  admin: any | null;
 } | null = null;
 
-function getServerConfig() {
+function getServerConfig(): NonNullable<typeof serverConfig> {
   if (serverConfig) return serverConfig;
   const supabaseUrl = (process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').replace(/\/$/, '');
   const anonKey = process.env.VITE_SUPABASE_ANON_KEY
@@ -17,8 +17,9 @@ function getServerConfig() {
   const admin = supabaseUrl && serviceRoleKey
     ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
     : null;
-  serverConfig = { supabaseUrl, anonKey, admin };
-  return serverConfig;
+  const config = { supabaseUrl, anonKey, admin };
+  serverConfig = config;
+  return config;
 }
 
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
