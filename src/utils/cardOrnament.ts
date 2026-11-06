@@ -7,7 +7,7 @@ export const CARD_ORNAMENT_SETTINGS_VERSION = 4;
 export const TIER_CARD_ORNAMENT_STORAGE_KEY = 'personas_tier_card_ornament_settings_v1';
 
 export const ORNAMENT_TIER_ORDER: EloTier[] = [
-  'challenger', 'grao_mestre', 'mestre', 'diamante', 'esmeralda', 'platina', 'ouro',
+  'lenda', 'challenger', 'grao_mestre', 'mestre', 'diamante', 'esmeralda', 'platina', 'ouro',
   'prata', 'bronze', 'ferro', 'madeira', 'criminoso',
 ];
 
@@ -24,7 +24,7 @@ export const DEFAULT_CARD_ORNAMENT_SETTINGS: CardOrnamentSettings = {
 };
 
 export function getTierOrnamentReferenceCard(cards: CardItem[], tier: EloTier): CardItem | undefined {
-  const tierCards = cards.filter((card) => card.tier === tier && !card.isLegend);
+  const tierCards = cards.filter((card) => card.tier === tier && (tier === 'lenda' || !card.isLegend));
   if (!tierCards.length) return undefined;
 
   // Kairos is the visual reference the creator selected for the Challenger frame.

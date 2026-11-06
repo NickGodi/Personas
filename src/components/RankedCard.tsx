@@ -359,11 +359,30 @@ export const RankedCard: React.FC<RankedCardProps> = ({
 
   // If this is a Lenda (Legend) card: White marble & gold format with neon
   if (card.isLegend) {
+    const legendCardWidth = size === 'sm' ? 195 : size === 'md' ? 260 : 310;
+    const legendCardHeight = size === 'sm' ? 305 : size === 'md' ? 410 : 485;
+    const legendBleed = legendCardWidth * 0.02;
+    const legendScaleY = activeOrnamentSettings.scale * activeOrnamentSettings.heightScale;
+    const legendFrameHeight = legendCardHeight + legendBleed * 2;
+    const legendOffsetY = (activeOrnamentSettings.offsetY / 100) * legendFrameHeight;
+    const legendScaleDelta = legendFrameHeight * (legendScaleY - 1);
+    const legendTopOverhang = Math.max(0, legendBleed + legendScaleDelta * 0.5 - legendOffsetY);
+    const legendBottomOverhang = Math.max(0, -legendBleed + legendFrameHeight + legendScaleDelta * 0.5 + legendOffsetY - legendCardHeight);
+    const legendOrnamentStyle: React.CSSProperties = {
+      inset: `${-legendBleed}px`,
+      transform: `translate(${activeOrnamentSettings.offsetX}%, ${activeOrnamentSettings.offsetY}%) scale(${activeOrnamentSettings.scale}, ${legendScaleY})`,
+      transformOrigin: 'center',
+    };
+    const legendOrnamentLayer = activeOrnamentSettings.layer === 'front' ? 'z-[60]' : 'z-10';
+    const legendOrnamentFilter = `grayscale(1) sepia(1) hue-rotate(15deg) saturate(3.2) brightness(1.08) drop-shadow(0 0 10px #f59e0b88)`;
+    const legendFrameSource = card.isMvp ? rankCardFrameMvp : rankCardFrameNoMvp;
+
     return (
       <div
         className={`relative ${dimensions} group cursor-pointer transition-all duration-300 transform perspective-1000 ${
           isHovered ? 'scale-105 -translate-y-2' : ''
         }`}
+        style={{ marginTop: `${legendTopOverhang + 10}px`, marginBottom: `${legendBottomOverhang}px` }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         onClick={onClick}
@@ -449,6 +468,50 @@ export const RankedCard: React.FC<RankedCardProps> = ({
             <CardCombatStats card={card} light />
 
           </div>
+        </div>
+        <div
+          className={`pointer-events-none absolute ${legendOrnamentLayer}`}
+          style={{
+            ...legendOrnamentStyle,
+            ...(activeOrnamentSettings.sideScale < 0.999 ? { filter: legendOrnamentFilter } : {}),
+          }}
+        >
+          {activeOrnamentSettings.sideScale < 0.999 ? (
+            <>
+              <OrnamentFrameSection
+                src={legendFrameSource}
+                sourceLeft={0}
+                sourceRight={0.24}
+                sourceTop={0.2}
+                sourceBottom={0.8}
+                destinationLeft={0}
+                destinationRight={0.24 * activeOrnamentSettings.sideScale}
+                destinationTop={0.2 * activeOrnamentSettings.topScale}
+                destinationBottom={0.8}
+              />
+              <OrnamentFrameSection
+                src={legendFrameSource}
+                sourceLeft={0.76}
+                sourceRight={1}
+                sourceTop={0.2}
+                sourceBottom={0.8}
+                destinationLeft={1 - 0.24 * activeOrnamentSettings.sideScale}
+                destinationRight={1}
+                destinationTop={0.2 * activeOrnamentSettings.topScale}
+                destinationBottom={0.8}
+              />
+              <OrnamentFrameSection src={legendFrameSource} sourceTop={0} sourceBottom={0.27} destinationTop={0} destinationBottom={0.27 * activeOrnamentSettings.topScale} />
+              <OrnamentFrameSection src={legendFrameSource} sourceTop={0.73} sourceBottom={1} destinationTop={0.73} destinationBottom={1} />
+            </>
+          ) : activeOrnamentSettings.topScale >= 0.999 && activeOrnamentSettings.topScale <= 1.001 ? (
+            <img src={legendFrameSource} alt="" aria-hidden="true" className="h-full w-full object-fill" style={{ filter: legendOrnamentFilter }} />
+          ) : (
+            <>
+              <OrnamentFrameSlice src={legendFrameSource} sourceStart={0} sourceEnd={0.24} destinationStart={0} destinationEnd={0.24 * activeOrnamentSettings.topScale} filter={legendOrnamentFilter} />
+              <OrnamentFrameSlice src={legendFrameSource} sourceStart={0.24} sourceEnd={0.76} destinationStart={0.24 * activeOrnamentSettings.topScale} destinationEnd={0.76} filter={legendOrnamentFilter} />
+              <OrnamentFrameSlice src={legendFrameSource} sourceStart={0.76} sourceEnd={1} destinationStart={0.76} destinationEnd={1} filter={legendOrnamentFilter} />
+            </>
+          )}
         </div>
       </div>
     );
