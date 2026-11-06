@@ -1,7 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
-import { createClient, type User as AuthUser } from '@supabase/supabase-js';
+import type { User as AuthUser } from '@supabase/supabase-js';
 import type { Request, Response } from 'express';
-import { signInWithLogin } from '../server/authLogin';
 import { parseOcrMatchStats } from '../src/utils/matchStats';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -9,9 +7,24 @@ const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY
   || process.env.SUPABASE_ANON_KEY
   || process.env.SUPABASE_PUBLISHABLE_KEY;
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY;
-const admin = supabaseUrl && serviceRoleKey
-  ? createClient(supabaseUrl, serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
-  : null;
+let adminClient: any | null = null;
+let adminClientLoaded = false;
+
+async function getAdminClient() {
+  if (adminClientLoaded) return adminClient;
+  adminClientLoaded = true;
+  if (!supabaseUrl || !serviceRoleKey) return null;
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    adminClient = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    return adminClient;
+  } catch (error) {
+    console.error('Falha ao inicializar o cliente administrativo do Supabase:', error);
+    return null;
+  }
+}
 
 const LEGACY_IDS: Record<string, string> = {
   '@derick': 'user_derick', '@nick': 'user_nicolas', '@maycao': 'user_maycao',
@@ -44,6 +57,7 @@ function getBearerToken(req: Request) {
 
 async function getActor(req: Request): Promise<{ authUser: AuthUser; profile: Profile; appId: string } | null> {
   const token = getBearerToken(req);
+  const admin = await getAdminClient();
   if (!admin || !token) return null;
   const { data: authData, error: authError } = await admin.auth.getUser(token);
   if (authError || !authData.user) return null;
@@ -73,6 +87,7 @@ function validTournamentState(state: any): state is TournamentState {
 }
 
 async function readTournamentState() {
+  const admin = await getAdminClient();
   if (!admin) throw new Error('Supabase server-side não está configurado.');
   const { data, error } = await admin.from('shared_app_state').select('state').eq('state_key', 'tournament').maybeSingle();
   if (error) throw error;
@@ -163,7 +178,9 @@ async function handleTournament(req: Request, res: Response) {
       ...state,
       updatedAt: Math.max(Date.now(), Number(current?.updatedAt || 0) + 1, Number(state.updatedAt)),
     };
-    const { error } = await admin!.from('shared_app_state').upsert({
+    const admin = await getAdminClient();
+    if (!admin) return responseError(res, 503, 'Supabase server-side não está configurado.');
+    const { error } = await admin.from('shared_app_state').upsert({
       state_key: 'tournament', state: savedState, updated_at: new Date().toISOString(),
     }, { onConflict: 'state_key' });
     if (error) throw error;
@@ -175,13 +192,14 @@ async function handleTournament(req: Request, res: Response) {
 }
 
 async function handlePresence(req: Request, res: Response) {
+  const admin = await getAdminClient();
   if (!admin) return responseError(res, 503, 'Presença compartilhada não configurada.');
   if (req.method === 'GET') {
     const cutoff = new Date(Date.now() - PRESENCE_TTL_MS).toISOString();
     const { data, error } = await admin.from('presence_sessions').select('profile_handle')
       .gt('last_seen_at', cutoff);
     if (error) return responseError(res, 503, 'Não foi possível consultar presenças.');
-    const userIds = [...new Set((data || []).map((row) => LEGACY_IDS[row.profile_handle] || row.profile_handle))];
+    const userIds = [...new Set((data || []).map((row: { profile_handle: string }) => LEGACY_IDS[row.profile_handle] || row.profile_handle))];
     return res.status(200).json({ userIds });
   }
   const actor = await getActor(req);
@@ -198,7 +216,7 @@ async function handlePresence(req: Request, res: Response) {
     if (error) return responseError(res, 503, 'Não foi possível atualizar sua presença.');
     const cutoff = new Date(Date.now() - PRESENCE_TTL_MS).toISOString();
     const { data } = await admin.from('presence_sessions').select('profile_handle').gt('last_seen_at', cutoff);
-    return res.status(200).json({ userIds: [...new Set((data || []).map((row) => LEGACY_IDS[row.profile_handle] || row.profile_handle))] });
+    return res.status(200).json({ userIds: [...new Set((data || []).map((row: { profile_handle: string }) => LEGACY_IDS[row.profile_handle] || row.profile_handle))] });
   }
   if (req.method === 'DELETE') {
     const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : req.body?.sessionId;
@@ -224,6 +242,7 @@ async function handleOcr(req: Request, res: Response) {
     if (!/^[A-Za-z0-9+/]+={0,2}$/.test(cleanBase64)) return responseError(res, 400, 'A imagem enviada está em um formato inválido.');
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return responseError(res, 503, 'O OCR ainda não está configurado. Configure GEMINI_API_KEY na Vercel.');
+    const { GoogleGenAI } = await import('@google/genai');
     const ai = new GoogleGenAI({ apiKey });
     const prompt = `Leia o print de uma partida de League of Legends. Extraia APENAS os dados do jogador identificado no cabeçalho/linha de estatísticas da imagem. Não extraia votos, médias, dados de outros jogadores, itens ou estatísticas que não foram pedidas.
 Responda somente um objeto JSON válido, sem Markdown, no formato:
@@ -246,8 +265,14 @@ export default async function handler(req: Request, res: Response) {
   if (route === 'auth/login' && req.method === 'POST') {
     const forwardedIps = String(req.headers['x-forwarded-for'] || '').split(',');
     const clientIp = forwardedIps[forwardedIps.length - 1]?.trim() || 'unknown';
-    const result = await signInWithLogin(req.body?.login, req.body?.password, clientIp);
-    return res.status(result.status).json(result.body);
+    try {
+      const { signInWithLogin } = await import('../server/authLogin');
+      const result = await signInWithLogin(req.body?.login, req.body?.password, clientIp);
+      return res.status(result.status).json(result.body);
+    } catch (error) {
+      console.error('Falha ao carregar o serviço de autenticação:', error);
+      return responseError(res, 503, 'Login compartilhado indisponível no momento.');
+    }
   }
   if (route === 'tournament-state') return handleTournament(req, res);
   if (route === 'presence') return handlePresence(req, res);
