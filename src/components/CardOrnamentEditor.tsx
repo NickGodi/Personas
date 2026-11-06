@@ -220,6 +220,46 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
         </div>
       </header>
 
+      <div className="grid gap-4 rounded-2xl border border-slate-800 bg-slate-950/60 p-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <label className="block text-xs font-semibold text-slate-300">
+          Elo para editar
+          <select
+            value={previewTier}
+            onChange={(event) => handleSelectTier(event.target.value as EloTier)}
+            className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white focus:border-amber-400 focus:outline-none"
+          >
+            {ORNAMENT_TIER_ORDER.map((tier) => (
+              <option key={tier} value={tier}>{TIER_LABELS[tier] || tier.replace('_', ' ')}</option>
+            ))}
+          </select>
+          <span className="mt-1 block text-[11px] text-slate-500">
+            O padrão escolhido alcança todas as cartas desse elo, mesmo quando ainda não existe uma carta publicada.
+          </span>
+        </label>
+
+        <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
+          <span className="text-xs font-semibold text-slate-200">Versão para conferir na prévia</span>
+          <div className="mt-2 grid grid-cols-3 gap-1.5">
+            {([
+              { id: 'card', label: 'Da carta' },
+              { id: 'without', label: 'Sem MVP' },
+              { id: 'mvp', label: 'Com MVP' },
+            ] as const).map((variant) => (
+              <button
+                key={variant.id}
+                type="button"
+                aria-pressed={previewMvpMode === variant.id}
+                onClick={() => setPreviewMvpMode(variant.id)}
+                className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition-colors ${previewMvpMode === variant.id ? 'border-amber-400 bg-amber-500/15 text-amber-200' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-white'}`}
+              >
+                {variant.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-slate-500">Na galeria, a versão é escolhida automaticamente pelo destaque MVP da carta.</p>
+        </div>
+      </div>
+
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(320px,1fr)_minmax(340px,1.15fr)]">
         <div className="flex min-h-[540px] flex-col items-center justify-center gap-4 overflow-hidden rounded-2xl border border-amber-400/20 bg-[radial-gradient(ellipse_at_center,_rgba(30,41,59,0.8),_rgba(2,6,23,0.98)_72%)] px-5 py-8 shadow-xl shadow-black/20 sm:px-12 sm:py-10 xl:sticky xl:top-20 xl:z-10 xl:self-start">
           <span className="rounded-full border border-amber-400/30 bg-slate-950/80 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-amber-200">Prévia · {TIER_LABELS[previewTier] || previewTier}</span>
@@ -236,62 +276,6 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
         </div>
 
         <div className="space-y-4">
-          <label className="block text-xs font-semibold text-slate-300">
-            Elo para editar
-            <select
-              value={previewTier}
-              onChange={(event) => handleSelectTier(event.target.value as EloTier)}
-              className="mt-1.5 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white focus:border-amber-400 focus:outline-none"
-            >
-              {ORNAMENT_TIER_ORDER.map((tier) => (
-                <option key={tier} value={tier}>{TIER_LABELS[tier] || tier.replace('_', ' ')}</option>
-              ))}
-            </select>
-            <span className="mt-1 block text-[11px] text-slate-500">
-              O padrão escolhido alcança todas as cartas desse elo, mesmo quando ainda não existe uma carta publicada.
-            </span>
-          </label>
-
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/20 bg-amber-950/15 p-3">
-            <div>
-              <p className="text-xs font-bold text-white">Moldura deste elo</p>
-              <p className="mt-1 text-[11px] text-slate-400">
-                {draft.showFrame ? 'A moldura aparece nas cartas atuais e futuras.' : 'As cartas deste elo aparecem sem moldura.'}
-              </p>
-            </div>
-            <button
-              type="button"
-              aria-pressed={!draft.showFrame}
-              onClick={() => updateDraft({ showFrame: !draft.showFrame })}
-              className={`inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold transition-colors ${draft.showFrame ? 'border-rose-500/40 bg-rose-950/40 text-rose-200 hover:bg-rose-900/50' : 'border-emerald-500/40 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-900/50'}`}
-            >
-              {draft.showFrame ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              {draft.showFrame ? 'Remover moldura' : 'Restaurar moldura'}
-            </button>
-          </div>
-
-          <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
-            <span className="text-xs font-semibold text-slate-200">Versão para conferir na prévia</span>
-            <div className="mt-2 grid grid-cols-3 gap-1.5">
-              {([
-                { id: 'card', label: 'Da carta' },
-                { id: 'without', label: 'Sem MVP' },
-                { id: 'mvp', label: 'Com MVP' },
-              ] as const).map((variant) => (
-                <button
-                  key={variant.id}
-                  type="button"
-                  aria-pressed={previewMvpMode === variant.id}
-                  onClick={() => setPreviewMvpMode(variant.id)}
-                  className={`rounded-lg border px-2 py-2 text-[11px] font-bold transition-colors ${previewMvpMode === variant.id ? 'border-amber-400 bg-amber-500/15 text-amber-200' : 'border-slate-700 bg-slate-950 text-slate-400 hover:text-white'}`}
-                >
-                  {variant.label}
-                </button>
-              ))}
-            </div>
-            <p className="mt-2 text-[11px] text-slate-500">Na galeria, a versão é escolhida automaticamente pelo destaque MVP da carta.</p>
-          </div>
-
           <div className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
             <h4 className="flex items-center gap-2 text-sm font-bold text-white"><Move className="h-4 w-4 text-amber-300" /> Ajuste fino</h4>
             <RangeControl
@@ -365,6 +349,24 @@ export const CardOrnamentEditor: React.FC<CardOrnamentEditorProps> = ({ cards, u
             </div>
             <p className="mt-2 text-[11px] leading-relaxed text-slate-500">Na frente, o bordado passa por cima do contorno e pode cobrir parte das informações.</p>
           </fieldset>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/20 bg-amber-950/15 p-3">
+            <div>
+              <p className="text-xs font-bold text-white">Moldura deste elo</p>
+              <p className="mt-1 text-[11px] text-slate-400">
+                {draft.showFrame ? 'A moldura aparece nas cartas atuais e futuras.' : 'As cartas deste elo aparecem sem moldura.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              aria-pressed={!draft.showFrame}
+              onClick={() => updateDraft({ showFrame: !draft.showFrame })}
+              className={`inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-bold transition-colors ${draft.showFrame ? 'border-rose-500/40 bg-rose-950/40 text-rose-200 hover:bg-rose-900/50' : 'border-emerald-500/40 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-900/50'}`}
+            >
+              {draft.showFrame ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              {draft.showFrame ? 'Remover moldura' : 'Restaurar moldura'}
+            </button>
+          </div>
 
           <div className="flex flex-col gap-2 sm:flex-row">
             <p className={`self-center text-xs ${saveError ? 'text-rose-300' : 'text-slate-400'}`} aria-live="polite">
