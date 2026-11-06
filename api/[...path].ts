@@ -49,10 +49,19 @@ function responseError(res: Response, status: number, message: string) {
 }
 
 function getBearerToken(req: Request) {
-  const authorization = req.headers.authorization;
+  const headers = req.headers as unknown as Headers & Record<string, string | string[] | undefined>;
+  const authorization = typeof headers.get === 'function' ? headers.get('authorization') : headers.authorization;
   return typeof authorization === 'string' && authorization.startsWith('Bearer ')
     ? authorization.slice(7)
     : null;
+}
+
+function getRoutePath(req: Request) {
+  const queryPath = req.query?.path;
+  if (Array.isArray(queryPath)) return queryPath.join('/');
+  if (typeof queryPath === 'string' && queryPath) return queryPath;
+  const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  return pathname.replace(/^\/api\/?/, '');
 }
 
 async function getActor(req: Request): Promise<{ authUser: AuthUser; profile: Profile; appId: string } | null> {
@@ -219,7 +228,7 @@ async function handlePresence(req: Request, res: Response) {
     return res.status(200).json({ userIds: [...new Set((data || []).map((row: { profile_handle: string }) => LEGACY_IDS[row.profile_handle] || row.profile_handle))] });
   }
   if (req.method === 'DELETE') {
-    const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : req.body?.sessionId;
+    const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId : req.body?.sessionId;
     if (typeof sessionId === 'string') {
       await admin.from('presence_sessions').delete().eq('session_id', sessionId).eq('user_id', actor.authUser.id);
     }
@@ -261,22 +270,24 @@ Interprete o KDA como abates/mortes/assistências, nesta ordem. Minions é o tot
 }
 
 export default async function handler(req: Request, res: Response) {
-  const route = Array.isArray(req.query.path) ? req.query.path.join('/') : String(req.query.path || '');
-  if (route === 'auth/login' && req.method === 'POST') {
-    const forwardedIps = String(req.headers['x-forwarded-for'] || '').split(',');
-    const clientIp = forwardedIps[forwardedIps.length - 1]?.trim() || 'unknown';
-    try {
+  try {
+    const route = getRoutePath(req);
+    if (route === 'auth/login' && req.method === 'POST') {
+      const headers = req.headers as unknown as Headers & Record<string, string | string[] | undefined>;
+      const forwardedFor = typeof headers.get === 'function' ? headers.get('x-forwarded-for') : headers['x-forwarded-for'];
+      const forwardedIps = String(forwardedFor || '').split(',');
+      const clientIp = forwardedIps[forwardedIps.length - 1]?.trim() || 'unknown';
       const { signInWithLogin } = await import('../server/authLogin');
       const result = await signInWithLogin(req.body?.login, req.body?.password, clientIp);
       return res.status(result.status).json(result.body);
-    } catch (error) {
-      console.error('Falha ao carregar o serviço de autenticação:', error);
-      return responseError(res, 503, 'Login compartilhado indisponível no momento.');
     }
+    if (route === 'tournament-state') return handleTournament(req, res);
+    if (route === 'presence') return handlePresence(req, res);
+    if (route === 'ocr' && req.method === 'POST') return handleOcr(req, res);
+    if (route === 'health' && req.method === 'GET') return res.status(200).json({ status: 'ok', app: 'Personas', time: new Date().toISOString() });
+    return responseError(res, 404, 'Rota não encontrada.');
+  } catch (error) {
+    console.error('Falha na função de API Personas:', error);
+    return responseError(res, 500, 'Não foi possível processar esta solicitação.');
   }
-  if (route === 'tournament-state') return handleTournament(req, res);
-  if (route === 'presence') return handlePresence(req, res);
-  if (route === 'ocr' && req.method === 'POST') return handleOcr(req, res);
-  if (route === 'health' && req.method === 'GET') return res.status(200).json({ status: 'ok', app: 'Personas', time: new Date().toISOString() });
-  return responseError(res, 404, 'Rota não encontrada.');
 }
