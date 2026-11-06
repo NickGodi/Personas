@@ -1,5 +1,5 @@
 import type { User as AuthUser } from '@supabase/supabase-js';
-import type { Request, Response } from 'express';
+import type { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import { parseOcrMatchStats } from '../src/utils/matchStats';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -44,11 +44,11 @@ type TournamentState = Record<string, any> & {
   captainIds: string[]; playerPoolIds: string[]; teams: Array<Record<string, any>>;
 };
 
-function responseError(res: Response, status: number, message: string) {
+function responseError(res: ExpressResponse, status: number, message: string) {
   return res.status(status).json({ error: message });
 }
 
-function getBearerToken(req: Request) {
+function getBearerToken(req: ExpressRequest) {
   const headers = req.headers as unknown as Headers & Record<string, string | string[] | undefined>;
   const authorization = typeof headers.get === 'function' ? headers.get('authorization') : headers.authorization;
   return typeof authorization === 'string' && authorization.startsWith('Bearer ')
@@ -56,7 +56,7 @@ function getBearerToken(req: Request) {
     : null;
 }
 
-function getRoutePath(req: Request) {
+function getRoutePath(req: ExpressRequest) {
   const queryPath = req.query?.path;
   if (Array.isArray(queryPath)) return queryPath.join('/');
   if (typeof queryPath === 'string' && queryPath) return queryPath;
@@ -64,7 +64,7 @@ function getRoutePath(req: Request) {
   return pathname.replace(/^\/api\/?/, '');
 }
 
-async function getActor(req: Request): Promise<{ authUser: AuthUser; profile: Profile; appId: string } | null> {
+async function getActor(req: ExpressRequest): Promise<{ authUser: AuthUser; profile: Profile; appId: string } | null> {
   const token = getBearerToken(req);
   const admin = await getAdminClient();
   if (!admin || !token) return null;
@@ -163,7 +163,7 @@ function mayMakeCaptainPick(current: TournamentState, state: TournamentState, ac
     && state.captainDraftTurn === expectedTurn && state.draftStage === expectedStage;
 }
 
-async function handleTournament(req: Request, res: Response) {
+async function handleTournament(req: ExpressRequest, res: ExpressResponse) {
   if (req.method === 'GET') {
     try { return res.status(200).json({ state: await readTournamentState() }); }
     catch { return responseError(res, 503, 'Estado compartilhado indisponível. Configure o Supabase.'); }
@@ -200,7 +200,7 @@ async function handleTournament(req: Request, res: Response) {
   }
 }
 
-async function handlePresence(req: Request, res: Response) {
+async function handlePresence(req: ExpressRequest, res: ExpressResponse) {
   const admin = await getAdminClient();
   if (!admin) return responseError(res, 503, 'Presença compartilhada não configurada.');
   if (req.method === 'GET') {
@@ -237,7 +237,7 @@ async function handlePresence(req: Request, res: Response) {
   return res.status(405).json({ error: 'Método não permitido.' });
 }
 
-async function handleOcr(req: Request, res: Response) {
+async function handleOcr(req: ExpressRequest, res: ExpressResponse) {
   const actor = await getActor(req);
   if (!actor) return responseError(res, 401, 'Entre na sua conta para usar o OCR.');
   if (actor.profile.role !== 'criador') return responseError(res, 403, 'O OCR está disponível apenas para o criador.');
@@ -269,7 +269,7 @@ Interprete o KDA como abates/mortes/assistências, nesta ordem. Minions é o tot
   }
 }
 
-export default async function handler(req: Request, res: Response) {
+async function dispatch(req: ExpressRequest, res: ExpressResponse) {
   try {
     const route = getRoutePath(req);
     if (route === 'auth/login' && req.method === 'POST') {
@@ -291,3 +291,39 @@ export default async function handler(req: Request, res: Response) {
     return responseError(res, 500, 'Não foi possível processar esta solicitação.');
   }
 }
+
+export default {
+  async fetch(request: Request): Promise<Response> {
+    try {
+      const url = new URL(request.url);
+      const route = url.pathname.replace(/^\/api\/?/, '');
+      const query = Object.fromEntries(url.searchParams.entries());
+      const body = request.method === 'GET' || request.method === 'HEAD'
+        ? undefined
+        : await request.json();
+      const req = {
+        method: request.method,
+        url: request.url,
+        headers: request.headers,
+        query: { ...query, path: route.split('/').filter(Boolean) },
+        body,
+      } as unknown as ExpressRequest;
+      const responseState: { statusCode: number; payload: unknown } = { statusCode: 200, payload: null };
+      const res = {
+        status(code: number) { responseState.statusCode = code; return this; },
+        json(payload: unknown) { responseState.payload = payload; return this; },
+      } as unknown as ExpressResponse;
+      await dispatch(req, res);
+      return new Response(JSON.stringify(responseState.payload ?? {}), {
+        status: responseState.statusCode,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    } catch (error) {
+      console.error('Falha ao receber solicitação na API Personas:', error);
+      return new Response(JSON.stringify({ error: 'Não foi possível processar esta solicitação.' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }
+  },
+};
