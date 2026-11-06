@@ -2,6 +2,7 @@ import express from 'express';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { parseOcrMatchStats } from './src/utils/matchStats';
 import { signInWithLogin } from './server/authLogin';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -214,7 +215,7 @@ async function startServer() {
     return res.json({ state: sharedTournamentState });
   });
 
-  // AI OCR Endpoint for parsing screenshots (Discord voting or match stats)
+  // AI OCR Endpoint for importing one player's latest match statistics.
   app.post('/api/ocr', async (req, res) => {
     try {
       const { imageBase64, mimeType = 'image/png' } = req.body ?? {};
@@ -240,46 +241,15 @@ async function startServer() {
       }
 
       const apiKey = process.env.GEMINI_API_KEY;
-
       if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-        // Fallback intelligent simulation if no valid key is present
-        return res.json({
-          success: true,
-          source: 'simulated_ocr',
-          data: {
-            title: 'Votação Extraída',
-            players: [
-              { nick: 'RAIQ', score: 70, role: 'CABS' },
-              { nick: 'Reis', score: 70, role: 'RÚSTICO' },
-              { nick: 'Maycão', score: 70, role: 'MID' },
-              { nick: 'Nick', score: 64, role: 'AP' },
-              { nick: 'Celesta', score: 70, role: 'SUP' },
-              { nick: 'Derick', score: 70, role: 'TAV' },
-            ],
-            calculatedAverage: 69,
-            notes: 'Dados processados via Heurística OCR de Votação (Personas Engine).'
-          }
-        });
+        return res.status(503).json({ success: false, error: 'O OCR não está configurado neste servidor. Configure GEMINI_API_KEY.' });
       }
 
-      // Initialize Gemini Client
       const ai = new GoogleGenAI({ apiKey });
-
-      const prompt = `Analise atentamente esta imagem de print de jogo ou chat de votação (ex: Discord, League of Legends, CBlow).
-Sua tarefa é extrair com precisão os nicks/nomes dos jogadores e as notas/votos dados para a partida ou jogador, ou estatísticas de KDA e média.
-Retorne EXCLUSIVAMENTE um objeto JSON válido (sem blocos de markdown ou texto adicional) com a seguinte estrutura:
-{
-  "title": "Votação da Partida" ou similar,
-  "players": [
-    {
-      "nick": "NomeDoJogador",
-      "score": 70,
-      "role": "Tag ou Cargo se houver"
-    }
-  ],
-  "calculatedAverage": 69,
-  "notes": "Observação se foi média indicada na imagem ou calculada"
-}`;
+      const prompt = `Leia o print de uma partida de League of Legends. Extraia APENAS os dados do jogador identificado no cabeçalho/linha de estatísticas da imagem. Não extraia votos, médias, dados de outros jogadores, itens ou estatísticas que não foram pedidas.
+Responda somente um objeto JSON válido, sem Markdown, no formato:
+{"playerName":"nome exatamente como aparece","kills":0,"deaths":0,"assists":0,"minions":0,"gold":0,"notes":""}
+Interprete o KDA como abates/mortes/assistências, nesta ordem. Minions é o total de tropas abatidas (CS). Gold é ouro total. Retorne todos os números como inteiros sem separadores de milhar (por exemplo, ouro 23.941 vira 23941). Se um dado não estiver legível ou visível, retorne null para esse campo. Não adivinhe e não invente valores. O nome deve ser o nome do jogador visível na linha escolhida; se não estiver legível, use null.`;
 
       const response = await ai.models.generateContent({
         model: 'gemini-3.8-flash',
@@ -300,52 +270,12 @@ Retorne EXCLUSIVAMENTE um objeto JSON válido (sem blocos de markdown ou texto a
       });
 
       const text = response.text || '';
-      // Extract json from possible code blocks
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        try {
-          const parsed = JSON.parse(jsonMatch[0]);
-          return res.json({ success: true, source: 'gemini_vision', data: parsed });
-        } catch {
-          // fallback if json parse error
-        }
-      }
-
-      return res.json({
-        success: true,
-        source: 'text_fallback',
-        data: {
-          raw: text,
-          players: [
-            { nick: 'RAIQ', score: 70 },
-            { nick: 'Reis', score: 70 },
-            { nick: 'Nick', score: 64 },
-            { nick: 'Derick', score: 70 }
-          ],
-          calculatedAverage: 68.5,
-          notes: 'Texto extraído do OCR com formatação aproximada.'
-        }
-      });
+      const data = parseOcrMatchStats(text);
+      return res.json({ success: true, source: 'gemini_vision', data });
     } catch (err: unknown) {
       console.error('Erro no OCR:', err);
-      // Fallback gracefully so UI never breaks
-      return res.json({
-        success: true,
-        source: 'resilient_fallback',
-        data: {
-          title: 'Votação Detectada',
-          players: [
-            { nick: 'RAIQ', score: 70, role: 'CABS' },
-            { nick: 'Reis', score: 70, role: 'RÚSTICO' },
-            { nick: 'Maycão', score: 70, role: 'MID' },
-            { nick: 'Nick', score: 64, role: 'AP' },
-            { nick: 'Celesta', score: 70, role: 'SUP' },
-            { nick: 'Derick', score: 70, role: 'TAV' }
-          ],
-          calculatedAverage: 69,
-          notes: 'OCR processou os dados da imagem com sucesso.'
-        }
-      });
+      const message = err instanceof Error ? err.message : 'Não foi possível processar o print.';
+      return res.status(502).json({ success: false, error: message });
     }
   });
 

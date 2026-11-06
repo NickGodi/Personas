@@ -43,9 +43,8 @@ export interface UserStats {
   kills: number;
   deaths: number;
   assists: number;
-  wards: number;
-  damageDealt: number;
-  damageReceived: number;
+  minions: number;
+  gold: number;
 }
 
 export interface PlayerComment {

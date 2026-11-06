@@ -31,7 +31,7 @@ const createPreviewCard = (tier: EloTier, user?: User): CardItem => ({
   isCriminoso: tier === 'criminoso',
   isLegend: tier === 'lenda',
   isMencaoHonrosa: false,
-  stats: user?.stats || { kills: 0, deaths: 0, assists: 0, wards: 0, damageDealt: 0, damageReceived: 0 },
+  stats: user?.stats || { kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 },
   date: '2026-01-01T00:00:00.000Z',
 });
 

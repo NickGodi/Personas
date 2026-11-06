@@ -42,9 +42,9 @@ import { SeasonCelebration } from './components/SeasonCelebration';
 import mascotAvatar from './assets/images/personas_duck_mascot_1793729518059.jpg';
 import { readStorage, writeStorage } from './utils/storage';
 import { CARD_ORNAMENT_SETTINGS_VERSION, CARD_ORNAMENT_SETTINGS_VERSION_KEY, CARD_ORNAMENT_STORAGE_KEY, DEFAULT_CARD_ORNAMENT_SETTINGS, loadCardOrnamentSettings, loadTierCardOrnamentSettings, migrateCardOrnamentSettings, normalizeCardOrnamentSettings, normalizeTierCardOrnamentSettings, ORNAMENT_TIER_ORDER, TIER_CARD_ORNAMENT_STORAGE_KEY } from './utils/cardOrnament';
-import { normalizeStats } from './utils/stats';
+import { formatGold, formatKda, normalizeStats } from './utils/stats';
 import { normalizeEmail, normalizeHandle, normalizeRiotId, validateUniqueUserIdentity } from './utils/userIdentity';
-import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, mergeRegisteredProfiles, saveAuthenticatedProfile, saveSharedCardOrnamentSettings } from './lib/supabase';
+import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, loadSharedPlayerMatchStats, mergeRegisteredProfiles, saveAuthenticatedProfile, saveSharedCardOrnamentSettings, saveSharedPlayerMatchStats } from './lib/supabase';
 import { 
   Sparkles, 
   Trophy, 
@@ -133,8 +133,8 @@ const selectSeasonCriminalId = (users: User[], votes: VoteRecord[], seasonNumber
     const kdaDifference = kda(a.user) - kda(b.user);
     if (kdaDifference) return kdaDifference;
     if (a.user.stats.deaths !== b.user.stats.deaths) return b.user.stats.deaths - a.user.stats.deaths;
-    if (a.user.stats.damageDealt !== b.user.stats.damageDealt) return a.user.stats.damageDealt - b.user.stats.damageDealt;
-    if (a.user.stats.wards !== b.user.stats.wards) return a.user.stats.wards - b.user.stats.wards;
+    if (a.user.stats.minions !== b.user.stats.minions) return a.user.stats.minions - b.user.stats.minions;
+    if (a.user.stats.gold !== b.user.stats.gold) return a.user.stats.gold - b.user.stats.gold;
     return a.user.name.localeCompare(b.user.name, 'pt-BR');
   })[0]?.user.id ?? null;
 };
@@ -622,6 +622,44 @@ export default function App() {
       window.clearInterval(interval);
     };
   }, []);
+
+  // Keep the latest imported match statistics visible to every visitor.
+  useEffect(() => {
+    if (!supabase) return;
+    let isDisposed = false;
+    const refreshMatchStats = async () => {
+      try {
+        const rows = await loadSharedPlayerMatchStats();
+        if (isDisposed || !rows) return;
+        const byPlayerId = new Map(rows.map((row) => [row.playerId, normalizeStats(row.stats)]));
+        setUsers((previous) => {
+          let changed = false;
+          const updated = previous.map((user) => {
+            const stats = byPlayerId.get(user.id);
+            if (!stats) return user;
+            if (user.stats.kills === stats.kills && user.stats.deaths === stats.deaths
+              && user.stats.assists === stats.assists && user.stats.minions === stats.minions
+              && user.stats.gold === stats.gold) return user;
+            changed = true;
+            return { ...user, stats };
+          });
+          return changed ? updated : previous;
+        });
+        setCards((previous) => previous.map((card) => {
+          const stats = card.season === activeSeason.number ? byPlayerId.get(card.userId) : undefined;
+          return stats ? { ...card, stats } : card;
+        }));
+      } catch {
+        // Keep the latest locally cached values available if the shared database is temporarily offline.
+      }
+    };
+    void refreshMatchStats();
+    const interval = window.setInterval(() => { void refreshMatchStats(); }, 15_000);
+    return () => {
+      isDisposed = true;
+      window.clearInterval(interval);
+    };
+  }, [activeSeason.number]);
 
   // Restore the shared Supabase session and keep sign-in/out in sync with the interface.
   useEffect(() => {
@@ -1243,7 +1281,7 @@ export default function App() {
       seasonsPlayed: 0,
       mvpCount: 0,
       aceCount: 0,
-      stats: { kills: 0, deaths: 0, assists: 0, wards: 0, damageDealt: 0, damageReceived: 0 },
+      stats: { kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 },
       entryDate: new Date().toLocaleDateString('pt-BR'),
       createdAt: new Date().toISOString(),
       comments: [],
@@ -1262,97 +1300,33 @@ export default function App() {
     return null;
   };
 
-  // OCR Statistics Distribution
-  const handleApplyOcrScores = (data: {
-    players: { userId: string; score: number; nick: string }[];
-    seasonAverage: number;
-    mvpUserId?: string;
-    notes?: string;
+  // OCR replaces the selected player's latest match statistics; it never creates rating votes.
+  const handleApplyOcrMatchStats = async (data: {
+    userId: string;
+    playerName: string;
+    stats: User['stats'];
   }) => {
-    const updatedUsers = users.map((u) => {
-      const importedScores = data.players
-        .filter((player) => player.userId === u.id)
-        .map((player) => Math.max(0, Math.min(100, Math.round(player.score))));
-      if (importedScores.length) {
-        const previousSeasonVotes = recentVotes.filter((vote) => vote.targetUserId === u.id && vote.season === activeSeason.number);
-        const scoreTotal = previousSeasonVotes.reduce((sum, vote) => sum + vote.score, 0)
-          + importedScores.reduce((sum, score) => sum + score, 0);
-        return {
-          ...u,
-          currentScore: Math.round(scoreTotal / (previousSeasonVotes.length + importedScores.length)),
-          totalVotes: recentVotes.filter((vote) => vote.targetUserId === u.id).length + importedScores.length,
-        };
-      }
-      return u;
-    });
+    if (!canAccessCreatorPanel || currentUser?.role !== 'criador' || isImpersonating) {
+      throw new Error('Somente a conta do criador pode atualizar as estatísticas por print.');
+    }
+    const target = users.find((user) => user.id === data.userId);
+    if (!target) throw new Error('Não encontrei esse jogador no elenco. Atualize a página e tente novamente.');
 
-    const previousMvpUserIds = new Set(cards
-      .filter((card) => card.season === activeSeason.number && card.isMvp)
-      .map((card) => card.userId));
-    setUsers(updatedUsers);
-
-    // Create cards
-    const newCards: CardItem[] = data.players.map((player) => {
-      const user = updatedUsers.find((candidate) => candidate.id === player.userId)!;
-      return createPlayerCard(
-        user,
-        activeSeason.number,
-        user.currentScore,
-        user.id === data.mvpUserId || previousMvpUserIds.has(user.id),
-      );
-    });
-
-    setCards((previous) => {
-      const importedPlayerIds = new Set(data.players.map((player) => player.userId));
-      const synchronized = previous
-        .filter((card) => !(card.season === activeSeason.number && importedPlayerIds.has(card.userId)))
-        .map((card) => {
-          if (card.season !== activeSeason.number) return card;
-          const updatedUser = updatedUsers.find((user) => user.id === card.userId);
-          if (!updatedUser) return card;
-          return {
-            ...card,
-            userName: updatedUser.name,
-            userHandle: updatedUser.handle,
-            userAvatar: updatedUser.avatar,
-            score: updatedUser.currentScore,
-            tier: getSeasonCardTier(updatedUser.currentScore, Boolean(updatedUser.isCriminoso), activeSeason.number),
-            isCriminoso: Boolean(updatedUser.isCriminoso),
-            isMvp: card.isMvp || updatedUser.id === data.mvpUserId,
-          };
-        });
-      return [...newCards, ...synchronized];
-    });
-
-    const importedAt = new Date().toISOString();
-    const importedVotes: VoteRecord[] = data.players.map((player, index) => {
-      const target = updatedUsers.find((user) => user.id === player.userId)!;
-      return {
-        id: `vote_ocr_${Date.now()}_${index}_${player.userId}`,
-        fromUserId: 'personas_ocr',
-        fromUserName: 'Importação OCR',
-        fromUserHandle: '@personas',
-        targetUserId: target.id,
-        targetUserName: target.name,
-        score: Math.max(0, Math.min(100, Math.round(player.score))),
-        season: activeSeason.number,
-        createdAt: importedAt,
-      };
-    });
-    setRecentVotes((previous) => [...previous, ...importedVotes]);
-
-    setNotifications((prev) => [
-      ...data.players.map((p) => ({
-        id: `notif_${Date.now()}_${p.userId}`,
-        userId: p.userId,
-        title: 'Estatísticas Atualizadas via OCR',
-        message: `Sua nota oficial foi computada: ${p.score}. Média recalculada!`,
-        type: 'card' as const,
-        read: false,
-        createdAt: 'Agora',
-      })),
-      ...prev,
-    ]);
+    const stats = normalizeStats(data.stats);
+    await saveSharedPlayerMatchStats(target.id, stats);
+    setUsers((previous) => previous.map((user) => user.id === target.id ? { ...user, stats } : user));
+    setCards((previous) => previous.map((card) =>
+      card.userId === target.id && card.season === activeSeason.number ? { ...card, stats } : card,
+    ));
+    setNotifications((previous) => [{
+      id: `notif_match_stats_${Date.now()}_${target.id}`,
+      userId: target.id,
+      title: 'Estatísticas da partida atualizadas',
+      message: `${formatKda(stats)} · ${stats.minions.toLocaleString('pt-BR')} minions · ${formatGold(stats.gold)} de ouro`,
+      type: 'card',
+      read: false,
+      createdAt: 'Agora',
+    }, ...previous]);
   };
 
   // Notes update the player's average, active-season card, and profile comments.
@@ -1965,7 +1939,7 @@ export default function App() {
         isOpen={isOcrModalOpen}
         onClose={() => setIsOcrModalOpen(false)}
         users={users}
-        onApplyScores={handleApplyOcrScores}
+        onApplyMatchStats={handleApplyOcrMatchStats}
       />
 
       {/* Profile Modal */}

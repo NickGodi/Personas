@@ -3,8 +3,8 @@ import { User, CardItem, Lane, SeasonArchive, EloTier, VoteRecord } from '../typ
 import { getTierFromScore } from '../data/initialData';
 import { RankedCard } from './RankedCard';
 import { TierCardOrnamentSettings } from '../utils/cardOrnament';
+import { formatGold, formatKda } from '../utils/stats';
 import {
-  Award,
   Calculator,
   Filter,
   LogIn,
@@ -127,7 +127,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     ? Math.round(currentSeasonVotes.reduce((sum, vote) => sum + vote.score, 0) / currentSeasonVotes.length)
     : null;
   const tier = currentAverage === null ? null : getTierFromScore(currentAverage, Boolean(user.isCriminoso));
-  const kda = ((user.stats.kills + user.stats.assists) / Math.max(1, user.stats.deaths)).toFixed(2);
+  const kda = formatKda(user.stats);
   const avatarPreview = avatar.trim() || user.avatar;
 
   if (!isOpen) return null;
@@ -360,11 +360,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 
           {activeTab === 'stats' && (
             <div className="space-y-5">
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                 <StatTile label="Média atual" value={currentAverage ?? '—'} icon={<Sparkles className="h-4 w-4" />} accent={currentAverage === null ? 'text-slate-500' : 'text-amber-300'} />
                 <StatTile label="Votos recebidos" value={currentSeasonVotes.length} icon={<Star className="h-4 w-4" />} accent="text-sky-300" />
                 <StatTile label="Temporadas" value={user.seasonsPlayed} icon={<Trophy className="h-4 w-4" />} accent="text-rose-300" />
-                <StatTile label="KDA" value={kda} icon={<Award className="h-4 w-4" />} accent="text-emerald-300" />
               </div>
               <section className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
                 <div className="mb-4 flex items-center justify-between gap-3">
@@ -375,12 +374,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   <span className={`rounded-lg border px-2.5 py-1 font-mono text-xs font-bold ${tier ? 'border-amber-500/30 bg-amber-950/40 text-amber-300' : 'border-slate-700 bg-slate-950 text-slate-500'}`}>{tier ? tierLabels[tier] : 'Sem média'}</span>
                 </div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                  <StatTile label="Abates" value={user.stats.kills} compact />
-                  <StatTile label="Mortes" value={user.stats.deaths} compact />
-                  <StatTile label="Assistências" value={user.stats.assists} compact />
-                  <StatTile label="Wards" value={user.stats.wards} compact />
-                  <StatTile label="Dano causado" value={user.stats.damageDealt.toLocaleString('pt-BR')} compact />
-                  <StatTile label="Dano recebido" value={user.stats.damageReceived.toLocaleString('pt-BR')} compact />
+                  <StatTile label="KDA (A/M/A)" value={kda} compact />
+                  <StatTile label="Minions" value={user.stats.minions ? user.stats.minions.toLocaleString('pt-BR') : '—'} compact />
+                  <StatTile label="Gold" value={user.stats.gold ? formatGold(user.stats.gold) : '—'} compact />
                 </div>
                 <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-800 pt-4 sm:grid-cols-3">
                   <StatTile label="Títulos MVP" value={user.mvpCount} compact />

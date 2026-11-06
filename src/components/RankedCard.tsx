@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { CardItem, CardOrnamentSettings, EloTier } from '../types';
 import { Sparkles, Flame, Star, Trophy, Award } from 'lucide-react';
-import { formatDamage } from '../utils/stats';
+import { formatGold, formatKda } from '../utils/stats';
 import { DEFAULT_CARD_ORNAMENT_SETTINGS, normalizeCardOrnamentSettings } from '../utils/cardOrnament';
 import rankCardFrameNoMvp from '../assets/images/personas-rank-card-frame-complete.png';
 import rankCardFrameMvp from '../assets/images/personas-rank-card-frame-mvp.png';
@@ -19,15 +19,12 @@ import rankCardFrameGraoMestre from '../assets/images/personas-rank-card-grao-me
 
 const CardCombatStats: React.FC<{ card: CardItem; light?: boolean }> = ({ card, light = false }) => {
   const values = [
-    ['ABATES', String(card.stats.kills)],
-    ['MORTES', String(card.stats.deaths)],
-    ['ASSIST.', String(card.stats.assists)],
-    ['WARDS', String(card.stats.wards)],
-    ['DANO +', formatDamage(card.stats.damageDealt)],
-    ['DANO -', formatDamage(card.stats.damageReceived)],
+    ['KDA', formatKda(card.stats)],
+    ['MINIONS', card.stats.minions ? String(card.stats.minions) : '—'],
+    ['OURO', card.stats.gold ? formatGold(card.stats.gold) : '—'],
   ];
   return (
-    <div className={`mt-1.5 grid grid-cols-3 gap-y-1 text-center ${light ? 'text-[#4a3b18]' : 'text-slate-100'}`}>
+    <div className={`mt-1.5 grid grid-cols-3 gap-x-1 gap-y-1 text-center ${light ? 'text-[#4a3b18]' : 'text-slate-100'}`}>
       {values.map(([label, value]) => (
         <div key={label}>
           <div className={`text-[8px] font-bold ${light ? 'text-slate-400' : 'text-slate-400'}`}>{label}</div>

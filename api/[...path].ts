@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { createClient, type User as AuthUser } from '@supabase/supabase-js';
 import type { Request, Response } from 'express';
 import { signInWithLogin } from '../server/authLogin';
+import { parseOcrMatchStats } from '../src/utils/matchStats';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY
@@ -222,19 +223,21 @@ async function handleOcr(req: Request, res: Response) {
     if (cleanBase64.length > 4_000_000) return responseError(res, 413, 'Reduza a imagem para menos de 3 MB antes de importar.');
     if (!/^[A-Za-z0-9+/]+={0,2}$/.test(cleanBase64)) return responseError(res, 400, 'A imagem enviada está em um formato inválido.');
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return res.status(200).json({ success: false, error: 'Configure GEMINI_API_KEY para ativar o OCR na Vercel.' });
+    if (!apiKey) return responseError(res, 503, 'O OCR ainda não está configurado. Configure GEMINI_API_KEY na Vercel.');
     const ai = new GoogleGenAI({ apiKey });
-    const prompt = `Leia esta imagem de partida ou votação e extraia nomes e notas. Responda apenas JSON válido no formato {"title":"...","players":[{"nick":"...","score":0,"role":"..."}],"calculatedAverage":0,"notes":"..."}.`;
+    const prompt = `Leia o print de uma partida de League of Legends. Extraia APENAS os dados do jogador identificado no cabeçalho/linha de estatísticas da imagem. Não extraia votos, médias, dados de outros jogadores, itens ou estatísticas que não foram pedidas.
+Responda somente um objeto JSON válido, sem Markdown, no formato:
+{"playerName":"nome exatamente como aparece","kills":0,"deaths":0,"assists":0,"minions":0,"gold":0,"notes":""}
+Interprete o KDA como abates/mortes/assistências, nesta ordem. Minions é o total de tropas abatidas (CS). Gold é ouro total. Retorne todos os números como inteiros sem separadores de milhar (por exemplo, ouro 23.941 vira 23941). Se um dado não estiver legível ou visível, retorne null para esse campo. Não adivinhe e não invente valores. O nome deve ser o nome do jogador visível na linha escolhida; se não estiver legível, use null.`;
     const response = await ai.models.generateContent({ model: 'gemini-3.8-flash', contents: [{ role: 'user', parts: [
       { text: prompt }, { inlineData: { data: cleanBase64, mimeType } },
     ] }] });
-    const matched = (response.text || '').match(/\{[\s\S]*\}/);
-    if (!matched) return responseError(res, 502, 'O OCR não retornou um resultado legível.');
-    try { return res.status(200).json({ success: true, source: 'gemini_vision', data: JSON.parse(matched[0]) }); }
-    catch { return responseError(res, 502, 'O OCR retornou dados inválidos.'); }
+    const data = parseOcrMatchStats(response.text || '');
+    return res.status(200).json({ success: true, source: 'gemini_vision', data });
   } catch (error) {
     console.error('Falha no OCR:', error);
-    return responseError(res, 502, 'Não foi possível processar a imagem.');
+    const message = error instanceof Error ? error.message : 'Não foi possível processar a imagem.';
+    return responseError(res, 502, message);
   }
 }
 

@@ -38,7 +38,7 @@ export const INITIAL_USERS: User[] = [
     isLegend: true,
     entryDate: '10/01/2024',
     createdAt: '2024-01-10T12:00:00Z',
-    stats: { kills: 14, deaths: 2, assists: 9, wards: 12, damageDealt: 35000, damageReceived: 9900 },
+    stats: { kills: 14, deaths: 2, assists: 9, minions: 0, gold: 0 },
     comments: [
       {
         id: 'c_1',
@@ -70,7 +70,7 @@ export const INITIAL_USERS: User[] = [
     aceCount: 0,
     entryDate: '01/01/2024',
     createdAt: '2024-01-01T00:00:00Z',
-    stats: { kills: 13, deaths: 3, assists: 8, wards: 12, damageDealt: 34500, damageReceived: 10800 },
+    stats: { kills: 19, deaths: 9, assists: 5, minions: 330, gold: 23941 },
     comments: []
   },
   {
@@ -91,7 +91,7 @@ export const INITIAL_USERS: User[] = [
     aceCount: 2,
     entryDate: '15/01/2024',
     createdAt: '2024-01-15T10:00:00Z',
-    stats: { kills: 12, deaths: 4, assists: 7, wards: 12, damageDealt: 33500, damageReceived: 11700 },
+    stats: { kills: 12, deaths: 4, assists: 7, minions: 0, gold: 0 },
     comments: []
   },
   {
@@ -112,7 +112,7 @@ export const INITIAL_USERS: User[] = [
     aceCount: 2,
     entryDate: '22/01/2024',
     createdAt: '2024-01-22T14:00:00Z',
-    stats: { kills: 9, deaths: 3, assists: 11, wards: 11, damageDealt: 32750, damageReceived: 12600 },
+    stats: { kills: 9, deaths: 3, assists: 11, minions: 0, gold: 0 },
     comments: []
   },
   {
@@ -133,7 +133,7 @@ export const INITIAL_USERS: User[] = [
     aceCount: 3,
     entryDate: '02/02/2024',
     createdAt: '2024-02-02T16:00:00Z',
-    stats: { kills: 10, deaths: 4, assists: 6, wards: 11, damageDealt: 31750, damageReceived: 13500 },
+    stats: { kills: 10, deaths: 4, assists: 6, minions: 0, gold: 0 },
     comments: []
   },
   {
@@ -154,7 +154,7 @@ export const INITIAL_USERS: User[] = [
     aceCount: 3,
     entryDate: '10/02/2024',
     createdAt: '2024-02-10T19:00:00Z',
-    stats: { kills: 3, deaths: 4, assists: 19, wards: 10, damageDealt: 30750, damageReceived: 12600 },
+    stats: { kills: 3, deaths: 4, assists: 19, minions: 0, gold: 0 },
     comments: []
   },
   {
@@ -175,7 +175,7 @@ export const INITIAL_USERS: User[] = [
     aceCount: 1,
     entryDate: '18/02/2024',
     createdAt: '2024-02-18T20:30:00Z',
-    stats: { kills: 6, deaths: 5, assists: 12, wards: 10, damageDealt: 29500, damageReceived: 15300 },
+    stats: { kills: 6, deaths: 5, assists: 12, minions: 0, gold: 0 },
     comments: []
   },
   {
@@ -196,7 +196,7 @@ export const INITIAL_USERS: User[] = [
     aceCount: 2,
     entryDate: '25/02/2024',
     createdAt: '2024-02-25T11:00:00Z',
-    stats: { kills: 7, deaths: 6, assists: 5, wards: 9, damageDealt: 28500, damageReceived: 17100 },
+    stats: { kills: 7, deaths: 6, assists: 5, minions: 0, gold: 0 },
     comments: []
   },
   {
@@ -218,7 +218,7 @@ export const INITIAL_USERS: User[] = [
     isMencaoHonrosa: true,
     entryDate: '12/01/2024',
     createdAt: '2024-01-12T15:00:00Z',
-    stats: { kills: 6, deaths: 6, assists: 10, wards: 9, damageDealt: 28000, damageReceived: 18000 },
+    stats: { kills: 6, deaths: 6, assists: 10, minions: 0, gold: 0 },
     comments: []
   },
   {
@@ -239,7 +239,7 @@ export const INITIAL_USERS: User[] = [
     aceCount: 2,
     entryDate: '01/03/2024',
     createdAt: '2024-03-01T12:00:00Z',
-    stats: { kills: 2, deaths: 7, assists: 8, wards: 8, damageDealt: 25500, damageReceived: 19800 },
+    stats: { kills: 2, deaths: 7, assists: 8, minions: 0, gold: 0 },
     comments: []
   },
   {
@@ -260,7 +260,7 @@ export const INITIAL_USERS: User[] = [
     aceCount: 1,
     entryDate: '15/03/2024',
     createdAt: '2024-03-15T18:00:00Z',
-    stats: { kills: 3, deaths: 8, assists: 3, wards: 6, damageDealt: 23000, damageReceived: 22500 },
+    stats: { kills: 3, deaths: 8, assists: 3, minions: 0, gold: 0 },
     comments: []
   },
   {
@@ -281,7 +281,7 @@ export const INITIAL_USERS: User[] = [
     aceCount: 1,
     entryDate: '28/03/2024',
     createdAt: '2024-03-28T21:00:00Z',
-    stats: { kills: 1, deaths: 10, assists: 5, wards: 6, damageDealt: 21000, damageReceived: 24300 },
+    stats: { kills: 1, deaths: 10, assists: 5, minions: 0, gold: 0 },
     comments: []
   },
   {
@@ -303,7 +303,7 @@ export const INITIAL_USERS: User[] = [
     isCriminoso: false,
     entryDate: '05/01/2024',
     createdAt: '2024-01-05T19:00:00Z',
-    stats: { kills: 2, deaths: 12, assists: 3, wards: 4, damageDealt: 18750, damageReceived: 26820 },
+    stats: { kills: 2, deaths: 12, assists: 3, minions: 0, gold: 0 },
     comments: [
       {
         id: 'c_2',
@@ -337,7 +337,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 14, deaths: 2, assists: 9, wards: 12, damageDealt: 35000, damageReceived: 9900 },
+    stats: { kills: 14, deaths: 2, assists: 9, minions: 0, gold: 0 },
     date: 'Hoje'
   },
   // 2. Challenger (Nicolas)
@@ -356,7 +356,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 13, deaths: 3, assists: 8, wards: 12, damageDealt: 34500, damageReceived: 10800 },
+    stats: { kills: 19, deaths: 9, assists: 5, minions: 330, gold: 23941 },
     date: 'Hoje'
   },
   // 3. Grão Mestre (Maycão)
@@ -375,7 +375,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: true,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 12, deaths: 4, assists: 7, wards: 12, damageDealt: 33500, damageReceived: 11700 },
+    stats: { kills: 12, deaths: 4, assists: 7, minions: 0, gold: 0 },
     date: 'Ontem'
   },
   // 4. Mestre (Vexy)
@@ -394,7 +394,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 9, deaths: 3, assists: 11, wards: 11, damageDealt: 32750, damageReceived: 12600 },
+    stats: { kills: 9, deaths: 3, assists: 11, minions: 0, gold: 0 },
     date: 'Ontem'
   },
   // 5. Diamante (Raven)
@@ -413,7 +413,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 10, deaths: 4, assists: 6, wards: 11, damageDealt: 31750, damageReceived: 13500 },
+    stats: { kills: 10, deaths: 4, assists: 6, minions: 0, gold: 0 },
     date: '2 dias atrás'
   },
   // 6. Esmeralda (Celesta)
@@ -432,7 +432,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 3, deaths: 4, assists: 19, wards: 10, damageDealt: 30750, damageReceived: 12600 },
+    stats: { kills: 3, deaths: 4, assists: 19, minions: 0, gold: 0 },
     date: '3 dias atrás'
   },
   // 7. Platina (Kairos)
@@ -451,7 +451,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 6, deaths: 5, assists: 12, wards: 10, damageDealt: 29500, damageReceived: 15300 },
+    stats: { kills: 6, deaths: 5, assists: 12, minions: 0, gold: 0 },
     date: '4 dias atrás'
   },
   // 8. Ouro (Reis)
@@ -470,7 +470,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 7, deaths: 6, assists: 5, wards: 9, damageDealt: 28500, damageReceived: 17100 },
+    stats: { kills: 7, deaths: 6, assists: 5, minions: 0, gold: 0 },
     date: '5 dias atrás'
   },
   // 9. Prata (RAIQ)
@@ -490,7 +490,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isCriminoso: false,
     isLegend: false,
     isMencaoHonrosa: true,
-    stats: { kills: 6, deaths: 6, assists: 10, wards: 9, damageDealt: 28000, damageReceived: 18000 },
+    stats: { kills: 6, deaths: 6, assists: 10, minions: 0, gold: 0 },
     date: '1 semana atrás'
   },
   // 10. Bronze (Yago)
@@ -509,7 +509,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 2, deaths: 7, assists: 8, wards: 8, damageDealt: 25500, damageReceived: 19800 },
+    stats: { kills: 2, deaths: 7, assists: 8, minions: 0, gold: 0 },
     date: '1 semana atrás'
   },
   // 11. Ferro (Brutus)
@@ -528,7 +528,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 3, deaths: 8, assists: 3, wards: 6, damageDealt: 23000, damageReceived: 22500 },
+    stats: { kills: 3, deaths: 8, assists: 3, minions: 0, gold: 0 },
     date: '2 semanas atrás'
   },
   // 12. Madeira (Teco - Novo Elo!)
@@ -547,7 +547,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 1, deaths: 10, assists: 5, wards: 6, damageDealt: 21000, damageReceived: 24300 },
+    stats: { kills: 1, deaths: 10, assists: 5, minions: 0, gold: 0 },
     date: '2 semanas atrás'
   },
   // 13. Criminoso (Nick - Atrás das Grades)
@@ -566,7 +566,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 2, deaths: 12, assists: 3, wards: 4, damageDealt: 18750, damageReceived: 26820 },
+    stats: { kills: 2, deaths: 12, assists: 3, minions: 0, gold: 0 },
     date: 'Condenação ativa'
   }
 ];

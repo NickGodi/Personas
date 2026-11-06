@@ -90,7 +90,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, 
       id: '__novo_cadastro__', handle: normalizedHandle, name: name.trim(), email: normalizedEmail,
       role: 'jogador', isOnline: false, avatar: '', bio: '', favoriteChampion: '', primaryLane,
       riotId: normalizedRiotId, currentScore: 0, totalVotes: 0, seasonsPlayed: 0, mvpCount: 0,
-      aceCount: 0, stats: { kills: 0, deaths: 0, assists: 0, wards: 0, damageDealt: 0, damageReceived: 0 },
+      aceCount: 0, stats: { kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 },
       entryDate: new Date().toLocaleDateString('pt-BR'), createdAt: new Date().toISOString(), comments: [],
     };
     const creatorId = users.find((user) => user.role === 'criador')?.id || '';

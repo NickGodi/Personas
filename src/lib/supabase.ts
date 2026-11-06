@@ -1,5 +1,5 @@
 import { createClient, type User as AuthUser } from '@supabase/supabase-js';
-import type { CardOrnamentSettings, EloTier, Lane, User, UserRole } from '../types';
+import type { CardOrnamentSettings, EloTier, Lane, User, UserRole, UserStats } from '../types';
 import { INITIAL_USERS } from '../data/initialData';
 import mascotAvatar from '../assets/images/personas_duck_mascot_1793729518059.jpg';
 import { normalizeHandle, normalizeRiotId } from '../utils/userIdentity';
@@ -68,7 +68,43 @@ type ProfileRow = {
 };
 
 const PROFILE_FIELDS = 'id,handle,name,role,avatar,bio,favorite_champion,primary_lane,riot_id,created_at';
-const EMPTY_STATS = { kills: 0, deaths: 0, assists: 0, wards: 0, damageDealt: 0, damageReceived: 0 };
+const EMPTY_STATS = { kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 };
+
+export interface SharedPlayerMatchStats {
+  playerId: string;
+  stats: UserStats;
+  updatedAt: string;
+}
+
+export async function loadSharedPlayerMatchStats(): Promise<SharedPlayerMatchStats[] | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from('player_match_stats')
+    .select('player_id,kills,deaths,assists,minions,gold,updated_at');
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    playerId: String(row.player_id),
+    stats: {
+      kills: Number(row.kills),
+      deaths: Number(row.deaths),
+      assists: Number(row.assists),
+      minions: Number(row.minions),
+      gold: Number(row.gold),
+    },
+    updatedAt: String(row.updated_at),
+  }));
+}
+
+export async function saveSharedPlayerMatchStats(playerId: string, stats: UserStats): Promise<void> {
+  if (!supabase) return;
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError || !authData.user) throw authError || new Error('Entre na conta de criador para publicar as estatísticas.');
+  const { error } = await supabase.from('player_match_stats').upsert({
+    player_id: playerId,
+    ...stats,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'player_id' });
+  if (error) throw error;
+}
 
 function profileToUser(profile: ProfileRow, email?: string): User {
   const legacy = INITIAL_USERS.find((user) => normalizeHandle(user.handle) === normalizeHandle(profile.handle));
@@ -131,7 +167,10 @@ export async function saveAuthenticatedProfile(user: User): Promise<void> {
 
 export function mergeRegisteredProfiles(users: User[], profiles: User[]): User[] {
   const byId = new Map(users.map((user) => [user.id, user]));
-  profiles.forEach((profile) => byId.set(profile.id, profile));
+  profiles.forEach((profile) => {
+    const existing = byId.get(profile.id);
+    byId.set(profile.id, existing ? { ...profile, stats: existing.stats } : profile);
+  });
   return [...byId.values()];
 }
 

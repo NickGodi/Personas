@@ -1,467 +1,275 @@
-import React, { useState, useEffect } from 'react';
-import { User } from '../types';
+import React, { useEffect, useRef, useState } from 'react';
+import type { User, UserStats } from '../types';
+import { getSupabaseAuthorizationHeaders } from '../lib/supabase';
 import { sound } from '../utils/audio';
-import { 
-  Scan, 
-  Upload, 
-  CheckCircle2, 
-  AlertCircle, 
-  Loader2, 
-  Users, 
-  Calculator, 
-  Save, 
-  Image as ImageIcon,
-  Trophy,
-} from 'lucide-react';
-
-interface ExtractedPlayer {
-  nick: string;
-  score: number;
-  role?: string;
-  matchedUserId?: string;
-}
+import { isCompleteMatchStats, matchOcrPlayerName, parseOcrMatchStats, type ExtractedMatchStats } from '../utils/matchStats';
+import { AlertCircle, CheckCircle2, Coins, Loader2, Scan, Save, Swords, Upload, Users } from 'lucide-react';
 
 interface OcrParserModalProps {
   isOpen: boolean;
   onClose: () => void;
   users: User[];
-  onApplyScores: (results: {
-    players: { userId: string; score: number; nick: string }[];
-    seasonAverage: number;
-    mvpUserId?: string;
-    notes?: string;
-  }) => void;
+  onApplyMatchStats: (result: { userId: string; playerName: string; stats: UserStats }) => Promise<void>;
 }
 
-export const OcrParserModal: React.FC<OcrParserModalProps> = ({
-  isOpen,
-  onClose,
-  users,
-  onApplyScores,
-}) => {
+type ReviewData = ExtractedMatchStats & { matchedUserId?: string; ambiguousMatch: boolean };
+
+const IMAGE_MAX_SIZE = 15 * 1024 * 1024;
+const OCR_IMAGE_MAX_SIZE = 2_700_000;
+
+const blobToDataUrl = (blob: Blob) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => typeof reader.result === 'string' ? resolve(reader.result) : reject(new Error('Não foi possível ler a imagem.'));
+  reader.onerror = () => reject(new Error('Não foi possível ler a imagem.'));
+  reader.readAsDataURL(blob);
+});
+
+async function prepareImageForOcr(file: File): Promise<{ dataUrl: string; mimeType: string }> {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, 2_600 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Este navegador não conseguiu preparar a imagem para leitura.');
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+    for (const quality of [0.94, 0.88, 0.82, 0.76, 0.68]) {
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+      if (blob && blob.size <= OCR_IMAGE_MAX_SIZE) return { dataUrl: await blobToDataUrl(blob), mimeType: 'image/jpeg' };
+    }
+    throw new Error('O print ficou grande demais mesmo após a compressão. Envie um recorte menor da tela.');
+  } finally {
+    bitmap.close();
+  }
+}
+
+export const OcrParserModal: React.FC<OcrParserModalProps> = ({ isOpen, onClose, users, onApplyMatchStats }) => {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [extractedData, setExtractedData] = useState<{
-    players: ExtractedPlayer[];
-    calculatedAverage: number;
-    notes?: string;
-    source?: string;
-  } | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [extractedData, setExtractedData] = useState<ReviewData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [matchMvpIndex, setMatchMvpIndex] = useState<number | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Handle Paste event anywhere when modal is open
+  const runOcrAnalysis = async (dataUrl: string, mimeType: string) => {
+    setIsLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+    setExtractedData(null);
+
+    try {
+      const authorization = await getSupabaseAuthorizationHeaders();
+      const response = await fetch('/api/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authorization },
+        body: JSON.stringify({ imageBase64: dataUrl, mimeType }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.success === false) {
+        throw new Error(payload.error || 'Não foi possível analisar o print. Tente novamente.');
+      }
+
+      const recognized = parseOcrMatchStats(JSON.stringify(payload.data ?? payload));
+      const match = matchOcrPlayerName(recognized.playerName, users);
+      setExtractedData({ ...recognized, matchedUserId: match.userId, ambiguousMatch: match.ambiguous });
+      sound.playVictory();
+    } catch (analysisError) {
+      setError(analysisError instanceof Error ? analysisError.message : 'Falha ao analisar o print.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const readAndProcessFile = async (file: File) => {
+    setError(null);
+    setSuccessMsg(null);
+    setExtractedData(null);
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setError('Use uma imagem PNG, JPEG ou WebP.');
+      return;
+    }
+    if (file.size > IMAGE_MAX_SIZE) {
+      setError('A imagem precisa ter no máximo 15 MB.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const prepared = await prepareImageForOcr(file);
+      setImagePreview(prepared.dataUrl);
+      await runOcrAnalysis(prepared.dataUrl, prepared.mimeType);
+    } catch (imageError) {
+      setIsLoading(false);
+      setError(imageError instanceof Error ? imageError.message : 'Não foi possível preparar o print.');
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
-
-    const handlePaste = (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-
-      for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-          const file = items[i].getAsFile();
-          if (file) {
-            readAndProcessFile(file);
-            break;
-          }
-        }
-      }
+    const handlePaste = (event: ClipboardEvent) => {
+      const image = Array.from(event.clipboardData?.items || []).find((item) => item.type.startsWith('image/'))?.getAsFile();
+      if (image) void readAndProcessFile(image);
     };
-
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
   }, [isOpen, users]);
 
   if (!isOpen) return null;
 
-  const readAndProcessFile = (file: File) => {
-    setError(null);
-    setSuccessMsg(null);
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-      setError('Use uma imagem PNG, JPEG ou WebP.');
+  const updateField = (field: keyof UserStats, rawValue: string) => {
+    if (!extractedData) return;
+    const parsed = rawValue === '' ? null : Number(rawValue);
+    setExtractedData({
+      ...extractedData,
+      [field]: parsed !== null && Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null,
+    });
+  };
+
+  const updatePlayerName = (playerName: string) => {
+    if (!extractedData) return;
+    const match = matchOcrPlayerName(playerName, users);
+    setExtractedData({ ...extractedData, playerName, matchedUserId: match.userId, ambiguousMatch: match.ambiguous });
+  };
+
+  const saveMatchStats = async () => {
+    if (!extractedData || !extractedData.matchedUserId || !isCompleteMatchStats(extractedData)) {
+      setError('Confirme o jogador e preencha KDA, minions e ouro antes de salvar.');
       return;
     }
-    if (file.size > 15 * 1024 * 1024) {
-      setError('A imagem precisa ter no máximo 15 MB.');
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const base64 = e.target?.result as string;
-      setImagePreview(base64);
-      runOcrAnalysis(base64, file.type);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      readAndProcessFile(file);
-    }
-  };
-
-  // Quick preset loader using the user's uploaded screenshot
-  const handleLoadSampleScreenshot = async () => {
+    setIsSaving(true);
     setError(null);
-    setIsLoading(true);
     try {
-      const response = await fetch('/assets/aistudio/image_866eb88a.png');
-      const blob = await response.blob();
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const base64 = e.target?.result as string;
-        setImagePreview(base64);
-        runOcrAnalysis(base64, blob.type || 'image/png');
-      };
-      reader.readAsDataURL(blob);
-    } catch {
-      setIsLoading(false);
-      setError('Falha ao carregar imagem de exemplo. Selecione uma do seu computador.');
-    }
-  };
-
-  const runOcrAnalysis = async (base64Image: string, mimeType = 'image/png') => {
-    setIsLoading(true);
-    setError(null);
-    setMatchMvpIndex(null);
-
-    try {
-      const res = await fetch('/api/ocr', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: base64Image, mimeType }),
+      await onApplyMatchStats({
+        userId: extractedData.matchedUserId,
+        playerName: extractedData.playerName || users.find((user) => user.id === extractedData.matchedUserId)?.name || 'Jogador',
+        stats: {
+          kills: extractedData.kills,
+          deaths: extractedData.deaths,
+          assists: extractedData.assists,
+          minions: extractedData.minions,
+          gold: extractedData.gold,
+        },
       });
-
-      if (!res.ok) {
-        throw new Error('Falha na resposta do servidor OCR');
-      }
-
-      const json = await res.json();
-      const rawPlayers: ExtractedPlayer[] = json.data?.players || [];
-
-      // Auto-match nicks with users in our database
-      const matchedPlayers = rawPlayers.map((p) => {
-        const cleanNick = p.nick.toLowerCase().trim();
-        const found = users.find(
-          (u) =>
-            u.name.toLowerCase().includes(cleanNick) ||
-            cleanNick.includes(u.name.toLowerCase()) ||
-            u.handle.toLowerCase().includes(cleanNick) ||
-            cleanNick.includes(u.handle.toLowerCase().replace('@', '')) ||
-            (u.riotId && u.riotId.toLowerCase().includes(cleanNick))
-        );
-        return {
-          ...p,
-          matchedUserId: found ? found.id : undefined,
-        };
-      });
-
-      // Recalculate average
-      const sum = matchedPlayers.reduce((acc, curr) => acc + (Number(curr.score) || 0), 0);
-      const avg = matchedPlayers.length > 0 ? Math.round((sum / matchedPlayers.length) * 10) / 10 : 0;
-
-      setExtractedData({
-        players: matchedPlayers,
-        calculatedAverage: json.data?.calculatedAverage || avg,
-        notes: json.data?.notes,
-        source: json.source,
-      });
-
+      setSuccessMsg('Estatísticas substituídas e sincronizadas no perfil do jogador.');
       sound.playVictory();
-    } catch (err: unknown) {
-      console.warn('Fallback to local heuristics parser:', err);
-      // Client-side fallback if server fails
-      const fallbackPlayers: ExtractedPlayer[] = [
-        { nick: 'RAIQ', score: 70, role: 'CABS' },
-        { nick: 'Reis', score: 70, role: 'RÚSTICO' },
-        { nick: 'Maycão', score: 70, role: 'MID' },
-        { nick: 'Nick', score: 64, role: 'AP' },
-        { nick: 'Celesta', score: 70, role: 'SUP' },
-        { nick: 'Derick', score: 70, role: 'TAV' },
-      ].map((p) => {
-        const found = users.find((u) => u.name.toLowerCase().includes(p.nick.toLowerCase()));
-        return { ...p, matchedUserId: found?.id };
-      });
-
-      setExtractedData({
-        players: fallbackPlayers,
-        calculatedAverage: 69,
-        notes: 'Heurística Local Personas (Modo de Contingência)',
-        source: 'local_heuristic',
-      });
+      window.setTimeout(onClose, 900);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Não foi possível salvar as estatísticas.');
     } finally {
-      setIsLoading(false);
+      setIsSaving(false);
     }
   };
 
-  const handleUpdateScore = (index: number, newScore: number) => {
-    if (!extractedData) return;
-    const updated = [...extractedData.players];
-    updated[index].score = newScore;
-    const sum = updated.reduce((acc, curr) => acc + (Number(curr.score) || 0), 0);
-    const avg = updated.length > 0 ? Math.round((sum / updated.length) * 10) / 10 : 0;
-    setExtractedData({
-      ...extractedData,
-      players: updated,
-      calculatedAverage: avg,
-    });
-  };
-
-  const handleUpdateMatchedUser = (index: number, userId: string) => {
-    if (!extractedData) return;
-    if (!userId && matchMvpIndex === index) setMatchMvpIndex(null);
-    const updated = [...extractedData.players];
-    updated[index].matchedUserId = userId;
-    setExtractedData({
-      ...extractedData,
-      players: updated,
-    });
-  };
-
-  const handleSaveAndDistribute = () => {
-    if (!extractedData || extractedData.players.length === 0) return;
-
-    const validPayload = extractedData.players
-      .filter((p) => p.matchedUserId)
-      .map((p) => ({
-        userId: p.matchedUserId!,
-        score: p.score,
-        nick: p.nick,
-      }));
-
-    if (validPayload.length === 0) {
-      setError('Por favor, vincule ao menos 1 jogador a um usuário cadastrado.');
-      return;
-    }
-
-    onApplyScores({
-      players: validPayload,
-      seasonAverage: extractedData.calculatedAverage,
-      mvpUserId: matchMvpIndex === null ? undefined : extractedData.players[matchMvpIndex]?.matchedUserId,
-      notes: extractedData.notes,
-    });
-
-    setSuccessMsg('Estatísticas distribuídas com sucesso para as cartas e perfis!');
-    sound.playVictory();
-    setTimeout(() => {
-      onClose();
-    }, 1200);
-  };
+  const selectedUser = users.find((user) => user.id === extractedData?.matchedUserId);
+  const statsComplete = Boolean(extractedData && isCompleteMatchStats(extractedData));
+  const fields: { key: keyof UserStats; label: string; limit: number }[] = [
+    { key: 'kills', label: 'Abates', limit: 100 },
+    { key: 'deaths', label: 'Mortes', limit: 100 },
+    { key: 'assists', label: 'Assistências', limit: 100 },
+    { key: 'minions', label: 'Minions', limit: 2_000 },
+    { key: 'gold', label: 'Ouro', limit: 1_000_000 },
+  ];
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="bg-slate-950 rounded-2xl border border-red-700/60 max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-        {/* Header */}
-        <div className="p-4 bg-gradient-to-r from-red-950/80 via-slate-900 to-slate-950 border-b border-red-900/40 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-red-600/20 border border-red-500/40 text-red-400">
-              <Scan className="w-5 h-5" />
-            </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 backdrop-blur-md">
+      <section role="dialog" aria-modal="true" aria-labelledby="ocr-title" className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-red-700/60 bg-slate-950 shadow-2xl">
+        <header className="flex items-center justify-between gap-3 border-b border-red-900/40 bg-gradient-to-r from-red-950/80 via-slate-900 to-slate-950 p-4">
+          <div className="flex items-center gap-3">
+            <span className="rounded-lg border border-red-500/40 bg-red-600/20 p-2 text-red-300"><Scan className="h-5 w-5" /></span>
             <div>
-              <h3 className="font-display font-extrabold text-lg text-white">
-                Distribuidor de Estatísticas via OCR
-              </h3>
-              <p className="text-xs text-slate-400">
-                Cole (Ctrl+V) ou envie o print do chat de votação ou pós-jogo para preencher automaticamente
-              </p>
+              <h2 id="ocr-title" className="font-display text-lg font-extrabold text-white">Importar estatísticas da partida</h2>
+              <p className="text-xs text-slate-400">Envie um print. O site identifica o jogador e lê KDA, minions e ouro.</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
-          >
-            ✕
-          </button>
-        </div>
+          <button type="button" onClick={onClose} aria-label="Fechar" className="rounded-lg p-2 text-slate-400 hover:bg-slate-800 hover:text-white">×</button>
+        </header>
 
-        {/* Content Body */}
-        <div className="p-4 md:p-6 overflow-y-auto space-y-6 flex-1">
-          {/* Drop / Paste Zone */}
-          <div className="flex flex-col md:flex-row gap-4">
-            {/* Input card */}
-            <div className="flex-1 border-2 border-dashed border-red-900/60 hover:border-red-500 rounded-2xl p-6 bg-slate-900/50 flex flex-col items-center justify-center text-center transition-colors relative">
+        <div className="flex-1 space-y-5 overflow-y-auto p-4 md:p-6">
+          <div className="grid gap-4 md:grid-cols-[1fr_250px]">
+            <label className="relative flex min-h-44 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-red-900/60 bg-slate-900/50 p-6 text-center transition hover:border-red-500">
               <input
+                ref={inputRef}
                 type="file"
                 accept="image/png,image/jpeg,image/webp"
-                onChange={handleFileInput}
-                className="absolute inset-0 opacity-0 cursor-pointer"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void readAndProcessFile(file);
+                  event.currentTarget.value = '';
+                }}
+                className="absolute inset-0 cursor-pointer opacity-0"
               />
-              <Upload className="w-10 h-10 text-red-400 mb-2" />
-              <h4 className="text-sm font-bold text-white">Arraste, selecione ou cole seu Print</h4>
-              <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                Pressione <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-amber-300 font-mono">Ctrl + V</kbd> para colar a captura de tela da área de transferência
-              </p>
+              <Upload className="mb-2 h-9 w-9 text-red-400" />
+              <span className="text-sm font-bold text-white">Selecione ou arraste um print</span>
+              <span className="mt-1 max-w-sm text-xs text-slate-400">Também pode colar uma imagem com Ctrl + V. O arquivo é preparado para leitura antes do envio.</span>
+            </label>
 
-              <div className="mt-4 flex flex-wrap gap-2 justify-center">
-                <button
-                  type="button"
-                  onClick={handleLoadSampleScreenshot}
-                  className="px-3 py-1.5 rounded-lg bg-red-950/80 border border-red-700/60 text-xs font-semibold text-red-300 hover:bg-red-900 transition-colors flex items-center gap-1.5 z-10"
-                >
-                  <ImageIcon className="w-3.5 h-3.5" />
-                  Carregar Print Exemplo (Discord)
-                </button>
+            {imagePreview ? (
+              <div className="relative flex h-44 items-center justify-center overflow-hidden rounded-xl border border-slate-800 bg-black">
+                <img src={imagePreview} alt="Prévia do print enviado" className="h-full w-full object-contain" />
+                <span className="absolute bottom-1 right-1 rounded bg-black/80 px-2 py-0.5 font-mono text-[10px] text-slate-300">Print ativo</span>
               </div>
-            </div>
-
-            {/* Preview of Image */}
-            {imagePreview && (
-              <div className="w-full md:w-56 h-48 md:h-auto rounded-xl border border-slate-800 overflow-hidden relative bg-black flex items-center justify-center">
-                <img
-                  src={imagePreview}
-                  alt="Screenshot do Jogo"
-                  className="w-full h-full object-contain"
-                />
-                <div className="absolute bottom-1 right-1 bg-black/80 px-2 py-0.5 rounded text-[10px] text-slate-300 font-mono">
-                  Captura Ativa
-                </div>
-              </div>
+            ) : (
+              <div className="flex h-44 items-center justify-center rounded-xl border border-slate-800 bg-slate-900/50 text-center text-xs text-slate-500">A prévia aparecerá aqui</div>
             )}
           </div>
 
-          {/* Loading Indicator */}
           {isLoading && (
-            <div className="p-8 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col items-center justify-center">
-              <Loader2 className="w-8 h-8 text-red-500 animate-spin mb-2" />
-              <p className="text-sm font-bold text-white">Processando imagem com OCR Inteligente...</p>
-              <p className="text-xs text-slate-400 mt-1">Identificando nicks, notas, cargos e calculando médias</p>
+            <div className="flex items-center gap-3 rounded-xl border border-slate-800 bg-slate-900/70 p-4">
+              <Loader2 className="h-5 w-5 animate-spin text-red-400" />
+              <div><p className="text-sm font-bold text-white">Lendo os dados da partida…</p><p className="text-xs text-slate-400">Localizando o nome, KDA, minions e ouro.</p></div>
             </div>
           )}
 
-          {/* Error / Success message */}
-          {error && (
-            <div className="p-3 rounded-xl bg-red-950/60 border border-red-600/60 text-red-200 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
-          {successMsg && (
-            <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-600/60 text-emerald-200 text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>{successMsg}</span>
-            </div>
-          )}
+          {error && <div role="alert" className="flex gap-2 rounded-xl border border-red-700/60 bg-red-950/50 p-3 text-sm text-red-200"><AlertCircle className="h-4 w-4 shrink-0" />{error}</div>}
+          {successMsg && <div role="status" className="flex gap-2 rounded-xl border border-emerald-700/60 bg-emerald-950/40 p-3 text-sm text-emerald-200"><CheckCircle2 className="h-4 w-4 shrink-0" />{successMsg}</div>}
 
-          {/* Extracted Results Table */}
           {extractedData && !isLoading && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                <div className="flex items-center gap-2">
-                  <Users className="w-4 h-4 text-amber-400" />
-                  <span className="text-sm font-bold text-white">
-                    Jogadores e Notas Detectados ({extractedData.players.length})
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 px-3 py-1 rounded-lg bg-red-950/80 border border-red-700/60">
-                  <Calculator className="w-4 h-4 text-amber-400" />
-                  <span className="text-xs text-slate-300">Média Calculada:</span>
-                  <span className="text-sm font-black font-mono text-amber-400">
-                    {extractedData.calculatedAverage}
-                  </span>
-                </div>
+            <section className="space-y-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+              <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+                <Users className="h-4 w-4 text-sky-300" />
+                <h3 className="text-sm font-bold text-white">Jogador encontrado no print</h3>
               </div>
-
-              {extractedData.source !== 'gemini_vision' && (
-                <p role="status" className="flex items-start gap-2 rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-xs leading-relaxed text-amber-200">
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-                  <span>Modo de demonstração: estes valores são simulados e não foram extraídos da imagem. Confira tudo antes de salvar.</span>
-                </p>
-              )}
-
-              {/* Table */}
-              <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/40">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-900 text-slate-400 font-mono uppercase text-[11px] border-b border-slate-800">
-                    <tr>
-                      <th className="py-2.5 px-3">Nick na Imagem</th>
-                      <th className="py-2.5 px-3">Cargo / Tag</th>
-                      <th className="py-2.5 px-3">Nota (0-100)</th>
-                      <th className="py-2.5 px-3">MVP da partida</th>
-                      <th className="py-2.5 px-3">Vincular a Usuário Personas</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800 text-slate-200">
-                    {extractedData.players.map((item, idx) => (
-                      <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                        <td className="py-2.5 px-3 font-semibold text-white">{item.nick}</td>
-                        <td className="py-2.5 px-3 font-mono text-slate-400">{item.role || '—'}</td>
-                        <td className="py-2.5 px-3">
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={item.score}
-                            onChange={(e) => handleUpdateScore(idx, Number(e.target.value))}
-                            className="w-16 px-2 py-1 rounded bg-slate-950 border border-slate-700 font-mono font-bold text-amber-300 focus:outline-none focus:border-red-500"
-                          />
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <button
-                            type="button"
-                            disabled={!item.matchedUserId}
-                            aria-pressed={matchMvpIndex === idx}
-                            onClick={() => setMatchMvpIndex((current) => current === idx ? null : idx)}
-                            className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${matchMvpIndex === idx ? 'border-amber-400 bg-amber-400/15 text-amber-200' : 'border-slate-700 text-slate-400 hover:border-amber-500/50 hover:text-amber-200'}`}
-                          >
-                            <Trophy className="h-3.5 w-3.5" />
-                            {matchMvpIndex === idx ? 'MVP' : 'Marcar'}
-                          </button>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <select
-                            value={item.matchedUserId || ''}
-                            onChange={(e) => handleUpdateMatchedUser(idx, e.target.value)}
-                            className="px-2 py-1 rounded bg-slate-950 border border-slate-700 text-slate-200 text-xs focus:outline-none focus:border-red-500 max-w-[200px]"
-                          >
-                            <option value="">-- Não vinculado --</option>
-                            {users.map((u) => (
-                              <option key={u.id} value={u.id}>
-                                {u.name} ({u.handle})
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="text-xs font-semibold text-slate-300">Nome lido no print
+                  <input value={extractedData.playerName || ''} onChange={(event) => updatePlayerName(event.target.value)} placeholder="Digite o nome visível no print" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400" />
+                </label>
+                <label className="text-xs font-semibold text-slate-300">Perfil correspondente
+                  <select value={extractedData.matchedUserId || ''} onChange={(event) => setExtractedData({ ...extractedData, matchedUserId: event.target.value || undefined, ambiguousMatch: false })} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400">
+                    <option value="">Selecione o jogador</option>
+                    {users.map((user) => <option key={user.id} value={user.id}>{user.name} ({user.handle})</option>)}
+                  </select>
+                </label>
               </div>
+              {selectedUser && <p className="text-xs text-emerald-300">Correspondência: {selectedUser.name} · {selectedUser.handle}</p>}
+              {!selectedUser && <p className="text-xs text-amber-300">{extractedData.ambiguousMatch ? 'O nome combina com mais de um perfil. Escolha a pessoa correta.' : 'Não encontrei uma correspondência única. Escolha o perfil correto acima.'}</p>}
 
-              <p className="text-[11px] text-slate-500">Marque o jogador que foi MVP desta partida. Sem seleção, as cartas ficam sem o selo MVP.</p>
-
-              {extractedData.notes && (
-                <p className="text-[11px] text-slate-400 italic">
-                  * {extractedData.notes}
-                </p>
-              )}
-            </div>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                {fields.map(({ key, label, limit }) => (
+                  <label key={key} className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs font-semibold text-slate-300">
+                    <span className="mb-2 flex items-center gap-1.5">{key === 'gold' ? <Coins className="h-3.5 w-3.5 text-amber-300" /> : key === 'minions' ? <Users className="h-3.5 w-3.5 text-emerald-300" /> : <Swords className="h-3.5 w-3.5 text-rose-300" />}{label}</span>
+                    <input type="number" min="0" max={limit} step="1" value={extractedData[key] ?? ''} onChange={(event) => updateField(key, event.target.value)} placeholder="Não lido" className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-base font-black text-amber-300 outline-none focus:border-amber-400" />
+                  </label>
+                ))}
+              </div>
+              {!statsComplete && <p className="text-xs text-amber-300">Confira os campos vazios e complete os valores que não puderam ser lidos antes de salvar.</p>}
+              {extractedData.notes && <p className="text-xs text-slate-400">Observação do OCR: {extractedData.notes}</p>}
+            </section>
           )}
         </div>
 
-        {/* Footer Actions */}
-        <div className="p-4 bg-slate-900 border-t border-slate-800 flex items-center justify-between">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white text-xs font-semibold transition-colors"
-          >
-            Cancelar
+        <footer className="flex items-center justify-between gap-3 border-t border-slate-800 bg-slate-900 p-4">
+          <button type="button" onClick={onClose} className="rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white">Cancelar</button>
+          <button type="button" onClick={() => void saveMatchStats()} disabled={!extractedData?.matchedUserId || !statsComplete || isLoading || isSaving} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-red-950 transition disabled:cursor-not-allowed disabled:opacity-40">
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            {isSaving ? 'Salvando…' : 'Substituir estatísticas do jogador'}
           </button>
-
-          <button
-            onClick={handleSaveAndDistribute}
-            disabled={!extractedData || extractedData.players.length === 0}
-            className="flex items-center gap-1.5 px-5 py-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white text-xs font-bold shadow-lg shadow-red-950 transition-all disabled:opacity-40"
-          >
-            <Save className="w-4 h-4" />
-            Distribuir e Salvar Estatísticas
-          </button>
-        </div>
-      </div>
+        </footer>
+      </section>
     </div>
   );
 };

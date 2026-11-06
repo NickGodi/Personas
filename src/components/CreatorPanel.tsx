@@ -455,9 +455,8 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                       ['Abates', 'kills'],
                       ['Mortes', 'deaths'],
                       ['Assist.', 'assists'],
-                      ['Wards', 'wards'],
-                      ['Dano causado', 'damageDealt'],
-                      ['Dano recebido', 'damageReceived'],
+                      ['Minions', 'minions'],
+                      ['Gold', 'gold'],
                     ] as const).map(([label, stat]) => (
                       <label key={stat} className="min-w-0 px-1">
                         <span className="block truncate text-slate-400">{label}</span>
