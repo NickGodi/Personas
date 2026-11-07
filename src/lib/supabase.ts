@@ -78,6 +78,16 @@ export async function deleteSharedNotification(eventKey: string): Promise<void> 
   if (error) throw error;
 }
 
+export async function deleteAllSharedNotifications(): Promise<void> {
+  if (!supabase) return;
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError || !authData.user) throw authError || new Error('Entre na sua conta para excluir as notificações.');
+  const { error } = await supabase.from('user_notifications')
+    .delete()
+    .eq('recipient_auth_user_id', authData.user.id);
+  if (error) throw error;
+}
+
 function voteRowToRecord(row: Record<string, unknown>): VoteRecord {
   return {
     id: String(row.id),

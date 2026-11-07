@@ -50,7 +50,7 @@ import { readStorage, writeStorage } from './utils/storage';
 import { CARD_ORNAMENT_SETTINGS_VERSION, CARD_ORNAMENT_SETTINGS_VERSION_KEY, CARD_ORNAMENT_STORAGE_KEY, DEFAULT_CARD_ORNAMENT_SETTINGS, loadCardOrnamentSettings, loadTierCardOrnamentSettings, migrateCardOrnamentSettings, normalizeCardOrnamentSettings, normalizeTierCardOrnamentSettings, ORNAMENT_TIER_ORDER, TIER_CARD_ORNAMENT_STORAGE_KEY } from './utils/cardOrnament';
 import { formatGold, formatKda, normalizeStats } from './utils/stats';
 import { normalizeEmail, normalizeHandle, normalizeRiotId, validateUniqueUserIdentity } from './utils/userIdentity';
-import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, loadSharedNotifications, loadSharedPlayerMatchRecords, loadSharedSeasonControl, loadSharedSeasonVotes, mergeRegisteredProfiles, saveAuthenticatedProfile, saveSharedCardOrnamentSettings, saveSharedNotification, saveSharedPlayerMatchRecord, saveSharedPlayerMatchStats, saveSharedSeasonControl, saveSharedSeasonVote, setSharedNotificationRead, deleteSharedNotification, deleteSharedSeasonVotes } from './lib/supabase';
+import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, loadSharedNotifications, loadSharedPlayerMatchRecords, loadSharedSeasonControl, loadSharedSeasonVotes, mergeRegisteredProfiles, saveAuthenticatedProfile, saveSharedCardOrnamentSettings, saveSharedNotification, saveSharedPlayerMatchRecord, saveSharedPlayerMatchStats, saveSharedSeasonControl, saveSharedSeasonVote, setSharedNotificationRead, deleteSharedNotification, deleteAllSharedNotifications, deleteSharedSeasonVotes } from './lib/supabase';
 import { 
   Sparkles, 
   Trophy, 
@@ -602,6 +602,8 @@ export default function App() {
       createdAt: 'Agora',
     }
   ]));
+  const notificationSyncRevisionRef = useRef(0);
+  const deletedNotificationIdsRef = useRef(new Set<string>());
 
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     {
@@ -741,6 +743,7 @@ export default function App() {
 
   const publishNotifications = useCallback((items: NotificationItem[]) => {
     if (!items.length) return;
+    notificationSyncRevisionRef.current += 1;
     setNotifications((previous) => [
       ...items.filter((item) => !previous.some((existing) => existing.id === item.id)),
       ...previous,
@@ -759,22 +762,43 @@ export default function App() {
   }, [canAccessCreatorPanel, creatorUser, users]);
 
   const handleMarkNotificationRead = useCallback((id: string) => {
+    notificationSyncRevisionRef.current += 1;
     setNotifications((previous) => previous.map((notification) => notification.id === id ? { ...notification, read: true } : notification));
     void setSharedNotificationRead(id, true).catch((error) => console.warn('Não foi possível marcar a notificação como lida.', error));
   }, []);
 
   const handleDeleteNotification = useCallback((id: string) => {
+    notificationSyncRevisionRef.current += 1;
+    deletedNotificationIdsRef.current.add(id);
     setNotifications((previous) => previous.filter((notification) => notification.id !== id));
     void deleteSharedNotification(id).catch((error) => console.warn('Não foi possível excluir a notificação compartilhada.', error));
   }, []);
 
   const handleMarkAllNotificationsRead = useCallback(() => {
     const unreadIds = visibleNotifications.filter((notification) => !notification.read).map((notification) => notification.id);
+    if (unreadIds.length === 0) return;
+    notificationSyncRevisionRef.current += 1;
     setNotifications((previous) => previous.map((notification) => unreadIds.includes(notification.id) ? { ...notification, read: true } : notification));
     unreadIds.forEach((id) => {
       void setSharedNotificationRead(id, true).catch((error) => console.warn('Não foi possível sincronizar a leitura da notificação.', error));
     });
   }, [visibleNotifications]);
+
+  const handleDeleteAllNotifications = useCallback(async () => {
+    if (!currentUser || isImpersonating || visibleNotifications.length === 0) return;
+    const idsToDelete = visibleNotifications.map((notification) => notification.id);
+    notificationSyncRevisionRef.current += 1;
+    idsToDelete.forEach((id) => deletedNotificationIdsRef.current.add(id));
+    try {
+      await deleteAllSharedNotifications();
+      notificationSyncRevisionRef.current += 1;
+      setNotifications((previous) => previous.filter((notification) => notification.userId !== currentUser.id));
+    } catch (error) {
+      idsToDelete.forEach((id) => deletedNotificationIdsRef.current.delete(id));
+      notificationSyncRevisionRef.current += 1;
+      console.warn('Não foi possível excluir todas as notificações.', error);
+    }
+  }, [currentUser, isImpersonating, visibleNotifications]);
   // Role preview and account impersonation change the displayed user, not the signed-in session.
   // The displayed profile is the one that should be online while the creator assumes it.
   const presenceActorId = currentUser?.id || null;
@@ -1191,15 +1215,24 @@ export default function App() {
     const syncNotifications = async () => {
       if (isSyncing) return;
       isSyncing = true;
+      const syncRevision = notificationSyncRevisionRef.current;
       try {
         const sharedNotifications = await loadSharedNotifications(currentUser.id);
-        if (!sharedNotifications || isDisposed) return;
+        if (!sharedNotifications || isDisposed || syncRevision !== notificationSyncRevisionRef.current) return;
         setNotifications((previous) => {
-          const sharedIds = new Set(sharedNotifications.map((notification) => notification.id));
+          const previousById = new Map(previous.map((notification) => [notification.id, notification] as const));
+          const visibleSharedNotifications = sharedNotifications
+            .filter((notification) => !deletedNotificationIdsRef.current.has(notification.id))
+            .map((notification) => previousById.get(notification.id)?.read
+              ? { ...notification, read: true }
+              : notification);
+          const sharedIds = new Set(visibleSharedNotifications.map((notification) => notification.id));
           const localOnlyForCurrentUser = previous.filter((notification) => (
-            notification.userId === currentUser.id && !sharedIds.has(notification.id)
+            notification.userId === currentUser.id
+            && !sharedIds.has(notification.id)
+            && !deletedNotificationIdsRef.current.has(notification.id)
           ));
-          return [...sharedNotifications, ...localOnlyForCurrentUser].slice(0, 200);
+          return [...visibleSharedNotifications, ...localOnlyForCurrentUser].slice(0, 200);
         });
       } catch (error) {
         console.warn('Não foi possível sincronizar as notificações da conta.', error);
@@ -2504,6 +2537,7 @@ export default function App() {
         onMarkNotificationRead={handleMarkNotificationRead}
         onDeleteNotification={handleDeleteNotification}
         onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
+        onDeleteAllNotifications={handleDeleteAllNotifications}
         theme={theme}
         onToggleTheme={handleToggleTheme}
         onTestRole={handleTestRole}

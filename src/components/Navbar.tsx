@@ -30,6 +30,7 @@ interface NavbarProps {
   onMarkNotificationRead: (id: string) => void;
   onDeleteNotification: (id: string) => void;
   onMarkAllNotificationsRead: () => void;
+  onDeleteAllNotifications: () => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
   onTestRole: (role: TestRole) => void;
@@ -51,6 +52,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onMarkNotificationRead,
   onDeleteNotification,
   onMarkAllNotificationsRead,
+  onDeleteAllNotifications,
   theme,
   onToggleTheme,
   onTestRole,
@@ -68,10 +70,16 @@ export const Navbar: React.FC<NavbarProps> = ({
   useEffect(() => {
     if (!showNotifications) return;
     const closeOnOutsideClick = (event: PointerEvent) => {
-      if (!notificationsRef.current?.contains(event.target as Node)) setShowNotifications(false);
+      if (!notificationsRef.current?.contains(event.target as Node)) {
+        onMarkAllNotificationsRead();
+        setShowNotifications(false);
+      }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setShowNotifications(false);
+      if (event.key === 'Escape') {
+        onMarkAllNotificationsRead();
+        setShowNotifications(false);
+      }
     };
     document.addEventListener('pointerdown', closeOnOutsideClick);
     document.addEventListener('keydown', closeOnEscape);
@@ -79,7 +87,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       document.removeEventListener('pointerdown', closeOnOutsideClick);
       document.removeEventListener('keydown', closeOnEscape);
     };
-  }, [showNotifications]);
+  }, [showNotifications, onMarkAllNotificationsRead]);
   useEffect(() => {
     if (!showRoleTester) return;
     const closeOnOutsideClick = (event: PointerEvent) => {
@@ -260,7 +268,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="relative" ref={notificationsRef}>
             <button
               type="button"
-              onClick={() => setShowNotifications(!showNotifications)}
+              onClick={() => {
+                onMarkAllNotificationsRead();
+                setShowNotifications((open) => !open);
+              }}
               aria-label={`Notificações${unreadNotifications.length ? `, ${unreadNotifications.length} não lidas` : ''}`}
               aria-expanded={showNotifications}
               className="relative p-2 rounded-xl bg-slate-900/80 border border-slate-800 text-slate-400 hover:text-white transition-colors"
@@ -276,16 +287,28 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {showNotifications && (
               <div className="absolute right-0 mt-2 w-80 max-w-[calc(100vw-1rem)] rounded-2xl bg-slate-950 border border-slate-800 shadow-2xl p-3 z-50 text-xs">
-                <div className="flex items-center justify-between gap-2 pb-2 border-b border-slate-800 font-bold text-white">
-                  <span>Notificações ({notifications.length})</span>
-                  {unreadNotifications.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={onMarkAllNotificationsRead}
-                      className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-amber-300 hover:bg-slate-800"
-                    >
-                      <CheckCheck className="h-3 w-3" /> Marcar todas como lidas
-                    </button>
+                <div className="pb-2 border-b border-slate-800">
+                  <div className="font-bold text-white">Notificações ({notifications.length})</div>
+                  {notifications.length > 0 && (
+                    <div className="mt-1.5 flex items-center justify-between gap-1">
+                      {unreadNotifications.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={onMarkAllNotificationsRead}
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-amber-300 hover:bg-slate-800"
+                        >
+                          <CheckCheck className="h-3 w-3" /> Marcar todas como lidas
+                        </button>
+                      ) : <span className="text-[10px] text-slate-500">Todas lidas</span>}
+                      <button
+                        type="button"
+                        onClick={onDeleteAllNotifications}
+                        aria-label="Excluir todas as notificações"
+                        className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[10px] text-red-300 hover:bg-red-950/50"
+                      >
+                        <Trash2 className="h-3 w-3" /> Excluir todas
+                      </button>
+                    </div>
                   )}
                 </div>
 
