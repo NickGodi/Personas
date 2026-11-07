@@ -7,7 +7,6 @@ import {
   DraftPreset, 
   ReportItem, 
   NotificationItem, 
-  ChatMessage, 
   VoteRecord,
   EloTier,
   UserRole,
@@ -41,7 +40,6 @@ import { OcrParserModal } from './components/OcrParserModal';
 import { ProfileModal } from './components/ProfileModal';
 import { LoginModal } from './components/LoginModal';
 import { ReportModal } from './components/ReportModal';
-import { FloatingChat } from './components/FloatingChat';
 import { StatisticsSection } from './components/StatisticsSection';
 import { SeasonControlBanner } from './components/SeasonControlBanner';
 import { SeasonCelebration } from './components/SeasonCelebration';
@@ -599,31 +597,6 @@ export default function App() {
   ]));
   const notificationSyncRevisionRef = useRef(0);
   const deletedNotificationIdsRef = useRef(new Set<string>());
-
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    {
-      id: 'msg_1',
-      senderId: 'user_derick',
-      senderName: 'Derick (Lenda Viva)',
-      senderHandle: '@derick',
-      senderAvatar: users.find((u) => u.id === 'user_derick')?.avatar || '',
-      senderRole: 'jogador',
-      text: 'Fala galera! Hoje tem draft com Agentes Livres e sorteio no Personas.',
-      timestamp: '20:15',
-      channel: 'global',
-    },
-    {
-      id: 'msg_2',
-      senderId: 'user_nick',
-      senderName: 'Nick Presidiário',
-      senderHandle: '@nick',
-      senderAvatar: users.find((u) => u.id === 'user_nick')?.avatar || '',
-      senderRole: 'jogador',
-      text: 'O Elo Criminoso continua meu kkkk na cela da Season 1!',
-      timestamp: '20:18',
-      channel: 'global',
-    }
-  ]);
 
   const [recentVotes, setRecentVotes] = useState<VoteRecord[]>(() =>
     readStorage('personas_votes_v1', [])
@@ -2029,17 +2002,6 @@ export default function App() {
     setTeams((previous) => previous.map((team) => team.captainId === normalized.id
       ? { ...team, captainName: normalized.name }
       : team));
-    setChatMessages((previous) => previous.map((message) =>
-      message.senderId === normalized.id || normalizeHandle(message.senderHandle) === previousHandle
-        ? {
-            ...message,
-            senderId: normalized.id,
-            senderName: normalized.name,
-            senderHandle: normalized.handle,
-            senderAvatar: normalized.avatar,
-          }
-        : message,
-    ));
     setCurrentUser((previous) => previous && matchesUpdatedUser(previous) ? { ...normalized } : previous);
     setProfileModalTarget((previous) => previous && matchesUpdatedUser(previous) ? { ...normalized } : previous);
   };
@@ -2435,37 +2397,6 @@ export default function App() {
 
   const handleResolveReport = (reportId: string, status: 'resolvido' | 'descartado') => {
     setReports((prev) => prev.map((r) => (r.id === reportId ? { ...r, status } : r)));
-  };
-
-  // Chat message
-  const handleSendMessage = (text: string) => {
-    if (!currentUser) return;
-
-    const newMsg: ChatMessage = {
-      id: `msg_${Date.now()}`,
-      senderId: currentUser.id,
-      senderName: currentUser.name,
-      senderHandle: currentUser.handle,
-      senderAvatar: currentUser.avatar,
-      senderRole: currentUser.role,
-      text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      channel: 'global',
-    };
-
-    setChatMessages((prev) => [...prev, newMsg]);
-
-    if (currentUser.id !== creatorUser.id) {
-      publishNotifications([{
-        id: `notif_chat_${Date.now()}`,
-        userId: creatorUser.id,
-        title: `Nova mensagem de ${currentUser.name}`,
-        message: text.length > 50 ? text.substring(0, 50) + '...' : text,
-        type: 'system',
-        read: false,
-        createdAt: 'Agora',
-      }]);
-    }
   };
 
   const hasThreeCompletedSeasons = new Set(seasonArchives.map((season) => season.number)).size >= 3;
@@ -2919,7 +2850,6 @@ export default function App() {
             cards={cardsWithAverage}
             deck={deck}
             reports={reports}
-            messages={chatMessages}
             currentCreatorUser={creatorUser}
             onImpersonateUser={handleImpersonateUser}
             onOpenProfile={setProfileModalTarget}
@@ -2939,14 +2869,6 @@ export default function App() {
           />
         )}
       </main>
-
-      {/* Floating Live Chat with Crowned Duck Mascot (Bottom Right) */}
-      <FloatingChat
-        currentUser={currentUser}
-        messages={chatMessages}
-        onSendMessage={handleSendMessage}
-        unreadCount={0}
-      />
 
       {/* OCR Screenshot Parser Modal */}
       <OcrParserModal

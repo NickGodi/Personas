@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { User, UserRole, CardItem, CardOrnamentSettings, MatchDeckCard, ReportItem, ChatMessage, TestRole, EloTier, Lane, VoteRecord } from '../types';
+import { User, UserRole, CardItem, CardOrnamentSettings, MatchDeckCard, ReportItem, TestRole, EloTier, Lane, VoteRecord } from '../types';
 import { BackgroundImageField } from './BackgroundImageField';
 import { CardOrnamentEditor } from './CardOrnamentEditor';
 import { DEFAULT_CARD_ORNAMENT_SETTINGS, TierCardOrnamentSettings } from '../utils/cardOrnament';
@@ -17,7 +17,6 @@ import {
   Crown,
   Search,
   Eye,
-  MessageSquare,
   ShieldCheck,
   Calendar,
   Scaling,
@@ -63,7 +62,6 @@ interface CreatorPanelProps {
   cards: CardItem[];
   deck: MatchDeckCard[];
   reports: ReportItem[];
-  messages: ChatMessage[];
   currentCreatorUser: User;
   onImpersonateUser: (user: User) => void;
   onOpenProfile: (user: User) => void;
@@ -92,7 +90,6 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
   cards,
   deck,
   reports,
-  messages,
   currentCreatorUser,
   onImpersonateUser,
   onOpenProfile,
@@ -108,7 +105,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
   onUpdateTierOrnamentSettings,
   onResetAllSeasons,
 }) => {
-  const [activeTab, setActiveTab] = useState<'players' | 'stats' | 'deck' | 'reports' | 'chat' | 'ornament'>('players');
+  const [activeTab, setActiveTab] = useState<'players' | 'stats' | 'deck' | 'reports' | 'ornament'>('players');
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isResettingSeasons, setIsResettingSeasons] = useState(false);
   const [resetSeasonsError, setResetSeasonsError] = useState<string | null>(null);
@@ -305,7 +302,6 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
           { id: 'stats', label: 'Ajuste de Estatísticas & Cartas', icon: Sliders, count: cards.length },
           { id: 'deck', label: 'Baralho de Regras Personas', icon: Layers, count: deck.length },
           { id: 'reports', label: 'Denúncias', icon: AlertOctagon, count: reports.filter((r) => r.status === 'pendente').length },
-          { id: 'chat', label: 'Mensagens do Chat', icon: MessageSquare, count: messages.length },
           { id: 'ornament', label: 'Editor de Cartas', icon: Scaling },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -795,50 +791,6 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
               ))}
             </div>
           )}
-        </div>
-      )}
-
-      {/* TAB 5: CHAT LOG */}
-      {activeTab === 'chat' && (
-        <div className="mt-6 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-            <div>
-              <h3 className="font-display font-bold text-base text-white">
-                Histórico de Mensagens do Chat Flutuante
-              </h3>
-              <p className="text-xs text-slate-400">
-                Todas as mensagens enviadas pelos jogadores no widget flutuante chegam aqui para o Criador
-              </p>
-            </div>
-            <span className="text-xs font-mono text-slate-400">
-              {messages.length} mensagens
-            </span>
-          </div>
-
-          <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 flex items-start gap-3 text-xs"
-              >
-                <img
-                  src={m.senderAvatar}
-                  alt={m.senderName}
-                  className="w-7 h-7 rounded-full object-cover shrink-0"
-                />
-                <div className="flex-1">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-white">{m.senderName}</span>
-                      <span className="text-[10px] font-mono text-slate-400">{displayLogin(m.senderHandle)}</span>
-                    </div>
-                    <span className="text-[10px] font-mono text-slate-500">{m.timestamp}</span>
-                  </div>
-                  <p className="text-slate-200">{m.text}</p>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
       )}
 

@@ -666,7 +666,7 @@ export const PERSONAS_RULES = {
     {
       title: '4. Sistema de Votação, Comentários & Médias',
       items: [
-        'Ao término de cada confronto, qualquer jogador pode clicar no perfil do atleta para atribuir notas de 0 a 100 e deixar um comentário no chat individual do jogador.',
+        'Ao término de cada confronto, qualquer jogador pode clicar no perfil do atleta para atribuir notas de 0 a 100 e deixar um comentário no perfil do jogador.',
         'A média aritmética determina a classificação, elo da temporada e honrarias individuais.',
         'O jogador de maior destaque no time vencedor é condecorado como MVP, e o do time perdedor condecorado como ACE.'
       ]

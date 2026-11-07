@@ -272,18 +272,6 @@ export interface NotificationItem {
   };
 }
 
-export interface ChatMessage {
-  id: string;
-  senderId: string;
-  senderName: string;
-  senderHandle: string;
-  senderAvatar: string;
-  senderRole: UserRole;
-  text: string;
-  timestamp: string;
-  channel: 'global' | 'draft' | 'creator_direct';
-}
-
 export interface DraftPreset {
   id: string;
   name: string;
