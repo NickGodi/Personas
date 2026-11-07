@@ -1,4 +1,5 @@
 import { User, MatchDeckCard, Team, CardItem, DraftPreset, EloTier } from '../types';
+import { PERSONAS_INITIAL_MATCH_DECK } from './personasCustomDeck';
 
 // High quality stylized test esports avatars (replacing user personal photos)
 const TEST_AVATARS = {
@@ -549,101 +550,7 @@ export const INITIAL_CARDS: CardItem[] = [
   }
 ];
 
-export const INITIAL_MATCH_DECK: MatchDeckCard[] = [
-  {
-    id: 'deck_1',
-    title: 'Lei Seca no Rift',
-    rule: 'Nenhum jogador pode comprar poções de vida ou refil nos primeiros 10 minutos de partida.',
-    description: 'A sustentação será puramente natural ou por feitiços de cura. Errou na troca, volta base!',
-    iconName: 'Wine',
-    tags: ['Sustentação', 'Early Game']
-  },
-  {
-    id: 'deck_2',
-    title: 'Inversão dos Presidentes',
-    rule: 'O Toplaner e o Midlaner devem trocar de rotas obrigatoriamente até a primeira torre cair.',
-    description: 'Os comandantes se enfrentam em territórios trocados testando adaptação tática.',
-    iconName: 'ArrowLeftRight',
-    tags: ['Rotação', 'Capitães']
-  },
-  {
-    id: 'deck_3',
-    title: 'Modo Gladiador (First Blood VIP)',
-    rule: 'O jogador que conquistar o First Blood ganha automaticamente +5 pontos de bônus na média da rodada.',
-    description: 'Tudo ou nada no nível 1. A agressão é recompensada imediatamente na votação.',
-    iconName: 'Swords',
-    tags: ['Abates', 'Média']
-  },
-  {
-    id: 'deck_4',
-    title: 'Flash Proibido',
-    rule: 'É proibido selecionar o feitiço Flash. Substituição obrigatória por Fantasma ou Barreira.',
-    description: 'Sem botão de pânico! Posicionamento rigoroso e punições severas para quem se isolar.',
-    iconName: 'ZapOff',
-    tags: ['Feitiços', 'Caos']
-  },
-  {
-    id: 'deck_5',
-    title: 'Duelo dos Caçadores',
-    rule: 'Golpear (Smite) é estritamente proibido em monstros comuns, liberado apenas em Dragão e Barão.',
-    description: 'A limpeza da selva será no braço e o controle dos objetivos neutros vira pura guerra mental.',
-    iconName: 'Target',
-    tags: ['Jungle', 'Objetivos']
-  },
-  {
-    id: 'deck_6',
-    title: 'Veto do Capitão',
-    rule: 'Cada capitão escolhe 1 item lendário para banir do capitão rival antes de iniciar a partida.',
-    description: 'Anule a build perfeita do capitão adversário e force adaptações inusitadas.',
-    iconName: 'ShieldAlert',
-    tags: ['Itens', 'Mindgame']
-  },
-  {
-    id: 'deck_7',
-    title: 'O Retorno do Criminoso',
-    rule: 'O jogador classificado como Criminoso recebe prioridade total de farm no arauto e na primeira barricada.',
-    description: 'Uma chance de redenção para sair da prisão com honra diante dos companheiros!',
-    iconName: 'Key',
-    tags: ['Criminoso', 'Redenção']
-  },
-  {
-    id: 'deck_8',
-    title: 'Roleta da Selva Invertida',
-    rule: 'Os dois junglers são obrigados a começar a partida invadindo o buff vermelho do adversário.',
-    description: 'Caos no level 1! Invasão mútua garantida e emboscadas imprevistas no rio.',
-    iconName: 'Compass',
-    tags: ['Invasão', 'Jungle']
-  },
-  ...[
-    ['Todos Aleatório', 'Todas as escolhas da partida são sorteadas entre as opções válidas.', 'A sorte define a composição e o plano de jogo.', 'Shuffle', ['Sorteio', 'CBLOW']],
-    ['A Mesma de Outra Época', 'Repita uma regra ou composição usada em uma partida anterior.', 'Uma volta ao meta de outra época da comunidade.', 'History', ['Nostalgia', 'CBLOW']],
-    ['ABCDraft', 'A ordem de escolha segue as letras do alfabeto; cada capitão escolhe uma opção por vez.', 'Organize o draft em ordem alfabética.', 'ListOrdered', ['Draft', 'CBLOW']],
-    ['Coach Presidencial', 'Cada equipe escolhe um coach para orientar as decisões antes do início.', 'O coach ajuda a definir estratégia e escolhas do time.', 'Crown', ['Estratégia', 'CBLOW']],
-    ['Draft Chumbus', 'Os capitães alternam as escolhas dos jogadores disponíveis.', 'Monte os times em um draft alternado.', 'Users', ['Draft', 'CBLOW']],
-    ['Modo Caos', 'O criador sorteia uma regra extra para a partida.', 'Uma condição inesperada muda o plano de jogo.', 'Zap', ['Caos', 'CBLOW']],
-    ['Modo Telep', 'Cada equipe combina sua estratégia antes da partida e evita revelar o plano ao adversário.', 'Coordenação e leitura do mapa em primeiro plano.', 'Brain', ['Estratégia', 'CBLOW']],
-    ['Voz por Proximidade', 'A comunicação de voz fica limitada aos jogadores próximos no jogo.', 'Informações dependem da posição de cada jogador.', 'AudioLines', ['Comunicação', 'CBLOW']],
-    ['Draft Sabotado', 'Antes do draft, cada capitão bloqueia uma escolha do time adversário.', 'Adapte a composição às escolhas vetadas.', 'ShieldBan', ['Draft', 'CBLOW']],
-    ['Draft Invertido', 'A ordem das escolhas começa pelo último capitão sorteado.', 'O segundo lado abre o draft e define o ritmo.', 'ArrowDownWideNarrow', ['Draft', 'CBLOW']],
-    ['Inimigo da Natureza', 'O time define uma restrição especial para objetivos neutros antes da partida.', 'A disputa por objetivos muda a rota pelo mapa.', 'TreePine', ['Objetivos', 'CBLOW']],
-    ['Invasão de Yuumi', 'Cada equipe deve incluir Yuumi na composição quando o campeão estiver disponível.', 'A estratégia gira em torno da campeã e de quem ela acompanha.', 'Cat', ['Campeões', 'CBLOW']],
-    ['Modo Auto-Fill', 'As rotas são sorteadas entre os participantes antes de começar.', 'Flexibilidade para jogar fora da rota principal.', 'Shuffle', ['Rotas', 'CBLOW']],
-    ['Tudo Liberado', 'Não há restrições extras de campeões, feitiços ou itens nesta partida.', 'Jogue com as escolhas normalmente disponíveis.', 'Unlock', ['Livre', 'CBLOW']],
-    ['Amigos da Natureza', 'As equipes priorizam objetivos da selva e coordenam a disputa pelo rio.', 'Dragões, Arauto e Barão entram no centro da estratégia.', 'Trees', ['Objetivos', 'CBLOW']],
-    ['Inter Classe', 'Cada equipe monta uma composição com classes variadas, evitando repetir o mesmo estilo.', 'Diversifique a composição para cobrir mais funções.', 'Layers', ['Composição', 'CBLOW']],
-    ['Only English', 'A comunicação de equipe durante a partida deve ser em inglês.', 'Um desafio de comunicação para o elenco.', 'Languages', ['Comunicação', 'CBLOW']],
-    ['Velocidade Ajustada', 'O criador escolhe um ritmo de jogo e uma condição de tempo antes da partida.', 'Partida com ritmo e objetivos definidos pela organização.', 'Gauge', ['Ritmo', 'CBLOW']],
-    ['Era das Máquinas', 'Cada equipe deve incluir pelo menos um campeão de temática mecânica ou tecnológica.', 'Monte uma composição com campeões de máquinas e tecnologia.', 'Cog', ['Campeões', 'CBLOW']],
-    ['Inversão de Rotas', 'Os jogadores trocam as rotas principais no início da partida.', 'Adaptação e comunicação para jogar fora da zona de conforto.', 'ArrowLeftRight', ['Rotas', 'CBLOW']],
-  ].map(([title, rule, description, iconName, tags], index) => ({
-    id: `cblow_${index + 1}`,
-    title: title as string,
-    rule: rule as string,
-    description: description as string,
-    iconName: iconName as string,
-    tags: tags as string[],
-  }))
-];
+export const INITIAL_MATCH_DECK: MatchDeckCard[] = PERSONAS_INITIAL_MATCH_DECK;
 
 export const INITIAL_TEAMS: Team[] = [
   {

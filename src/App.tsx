@@ -25,10 +25,10 @@ import {
 } from './types';
 import { 
   INITIAL_USERS, 
-  INITIAL_MATCH_DECK, 
   INITIAL_PRESETS,
   getTierFromScore 
 } from './data/initialData';
+import { PERSONAS_INITIAL_MATCH_DECK } from './data/personasCustomDeck';
 import { Navbar } from './components/Navbar';
 import { PORTABLE_CARD_ORNAMENT_SETTINGS } from './data/cardOrnamentSettings';
 import { RankedCard } from './components/RankedCard';
@@ -509,15 +509,20 @@ const resetVoteCountsForFirstSeason = () => {
 resetVoteCountsForFirstSeason();
 const INITIAL_APP_CARDS = loadInitialCards();
 
-const mergeImportedDeckCards = (savedDeck: MatchDeckCard[]): MatchDeckCard[] => {
-  const existingIds = new Set(savedDeck.map((card) => card.id));
-  const importedCards = INITIAL_MATCH_DECK.filter((card) => card.id.startsWith('cblow_') && !existingIds.has(card.id));
-  return [...savedDeck, ...importedCards];
-};
-
 const loadDeck = (): MatchDeckCard[] => {
-  const savedDeck = readStorage<MatchDeckCard[]>('personas_deck_v2', INITIAL_MATCH_DECK);
-  return readStorage<boolean>('personas_cblow_cards_v1', false) ? savedDeck : mergeImportedDeckCards(savedDeck);
+  const currentDeck = readStorage<MatchDeckCard[] | null>('personas_deck_v3', null);
+  if (Array.isArray(currentDeck)) return currentDeck;
+
+  const legacyDeck = readStorage<MatchDeckCard[] | null>('personas_deck_v2', null);
+  const isOldUncustomizedCatalog = Array.isArray(legacyDeck)
+    && legacyDeck.length >= 28
+    && legacyDeck.every((card) => !card.backgroundImage);
+
+  // Keep customized local decks, but replace the old photo-less 28-card catalog
+  // with the creator's portable 18-card deck on the first upgraded launch.
+  return Array.isArray(legacyDeck) && !isOldUncustomizedCatalog
+    ? legacyDeck
+    : PERSONAS_INITIAL_MATCH_DECK;
 };
 
 export default function App() {
@@ -1106,7 +1111,7 @@ export default function App() {
   }, [cards, seasonArchives]);
 
   useEffect(() => {
-    writeStorage('personas_deck_v2', deck);
+    writeStorage('personas_deck_v3', deck);
   }, [deck]);
 
   useEffect(() => {
@@ -1143,10 +1148,6 @@ export default function App() {
       window.clearInterval(interval);
     };
   }, [currentUser?.authId, currentUser?.id, isImpersonating]);
-
-  useEffect(() => {
-    writeStorage('personas_cblow_cards_v1', true);
-  }, []);
 
   useEffect(() => {
     writeStorage(SHARED_TOURNAMENT_STORAGE_KEY, sharedTournament);
