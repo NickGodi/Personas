@@ -553,6 +553,7 @@ export default function App() {
   const [isSharedTournamentReady, setIsSharedTournamentReady] = useState(false);
   const [isCheckInSaving, setIsCheckInSaving] = useState(false);
   const checkInSavingRef = useRef(false);
+  const [checkInError, setCheckInError] = useState('');
   const previousTournamentNotificationsRef = useRef<{ started: boolean; assignments: Map<string, string> } | null>(null);
   const [presets, setPresets] = useState<DraftPreset[]>(() =>
     readStorage('personas_presets_v2', INITIAL_PRESETS)
@@ -1453,7 +1454,7 @@ export default function App() {
     return () => window.clearTimeout(timeout);
   }, [seasonEvent]);
 
-  const handleToggleTournamentAttendance = (requestedTargetUserId?: string) => {
+  const handleToggleTournamentAttendance = async (requestedTargetUserId?: string) => {
     if (!currentUser) {
       if (!requestedTargetUserId) setIsLoginModalOpen(true);
       return;
@@ -1466,6 +1467,34 @@ export default function App() {
     const ownRosterUserId = currentRosterUserId || currentUser.id;
     if ((targetUserId && !canAccessCreatorPanel && targetUserId !== ownRosterUserId) || activeSeason.status === 'active' || sharedTournament.tournamentStarted || !isSharedTournamentReady
       || (sharedTournament.attendanceSeason !== undefined && sharedTournament.attendanceSeason !== activeSeason.number)) return;
+    if (!targetUserId) {
+      if (checkInSavingRef.current || isImpersonating) return;
+      const attendeeId = ownRosterUserId;
+      const isCheckedIn = canonicalRosterIds(sharedTournament.attendeeIds).includes(attendeeId);
+      checkInSavingRef.current = true;
+      setIsCheckInSaving(true);
+      setCheckInError('');
+      try {
+        const authorization = await getSupabaseAuthorizationHeaders();
+        const response = await fetch('/api/tournament-state', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', ...authorization },
+          body: JSON.stringify({ action: 'set-attendance', checkedIn: !isCheckedIn }),
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(payload?.error || 'Não foi possível salvar o check-in. Tente novamente.');
+        if (!payload?.state) throw new Error('O servidor não confirmou o check-in. Atualize a página e tente novamente.');
+        const confirmedState = normalizeSharedTournament(payload.state as Partial<SharedTournamentState>);
+        setSharedTournament((previous) => confirmedState.updatedAt >= previous.updatedAt ? confirmedState : previous);
+      } catch (error) {
+        setCheckInError(error instanceof Error ? error.message : 'Não foi possível salvar o check-in. Tente novamente.');
+      } finally {
+        checkInSavingRef.current = false;
+        setIsCheckInSaving(false);
+      }
+      return;
+    }
+
     const attendeeId = targetUserId && canAccessCreatorPanel ? targetUserId : ownRosterUserId;
     const previous = normalizeSharedTournament(sharedTournament);
     const normalizedAttendeeIds = canonicalRosterIds(previous.attendeeIds);
@@ -2485,7 +2514,9 @@ export default function App() {
               isCheckedIn={Boolean(currentRosterUserId && checkedInRosterIds.includes(currentRosterUserId))}
               checkInCount={checkedInRosterIds.length}
               checkedInPlayers={checkedInPlayers}
-              checkInDisabled={isCheckInSaving || !isSharedTournamentReady || (sharedTournament.attendanceSeason !== undefined && sharedTournament.attendanceSeason !== activeSeason.number)}
+              checkInDisabled={isCheckInSaving || isImpersonating || !isSharedTournamentReady || (sharedTournament.attendanceSeason !== undefined && sharedTournament.attendanceSeason !== activeSeason.number)}
+              checkInSubmitting={isCheckInSaving}
+              checkInError={checkInError}
               onCheckIn={() => handleToggleTournamentAttendance()}
               onStart={handleStartSeason}
               onFinish={() => handleFinalizeSeason(false)}

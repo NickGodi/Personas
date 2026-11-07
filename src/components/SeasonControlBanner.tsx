@@ -10,6 +10,8 @@ interface SeasonControlBannerProps {
   checkInCount: number;
   checkedInPlayers: Array<Pick<User, 'id' | 'name'>>;
   checkInDisabled: boolean;
+  checkInSubmitting?: boolean;
+  checkInError?: string;
   onCheckIn: () => void;
   onStart: () => void;
   onFinish: () => void;
@@ -23,6 +25,8 @@ export const SeasonControlBanner: React.FC<SeasonControlBannerProps> = ({
   checkInCount,
   checkedInPlayers,
   checkInDisabled,
+  checkInSubmitting = false,
+  checkInError = '',
   onCheckIn,
   onStart,
   onFinish,
@@ -87,7 +91,7 @@ export const SeasonControlBanner: React.FC<SeasonControlBannerProps> = ({
                   : 'bg-amber-500 text-slate-950 hover:bg-amber-400'}`}
               >
                 {isCheckedIn ? <Check className="h-4 w-4" /> : <Flag className="h-4 w-4" />}
-                {isCheckedIn ? 'Check-in confirmado · cancelar' : 'Fazer check-in'}
+                {checkInSubmitting ? 'Salvando check-in…' : isCheckedIn ? 'Check-in confirmado · cancelar' : 'Fazer check-in'}
               </button>
               <span className="inline-flex items-center gap-1.5 whitespace-nowrap px-1 text-[11px] font-semibold text-slate-400" aria-live="polite">
                 <Users className="h-3.5 w-3.5 text-sky-300" />
@@ -112,6 +116,7 @@ export const SeasonControlBanner: React.FC<SeasonControlBannerProps> = ({
             </button>
           )}
         </div>
+        {checkInError && <p role="alert" className="mt-2 text-xs font-semibold text-rose-300 sm:text-right">{checkInError}</p>}
       </div>
       {checkedInPlayers.length > 0 && (
         <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-slate-700/50 pt-3 sm:pl-[60px]">

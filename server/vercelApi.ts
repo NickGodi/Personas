@@ -236,6 +236,28 @@ async function handleTournament(req: ExpressRequest, res: ExpressResponse) {
   if (req.method !== 'PUT') return res.status(405).json({ error: 'Método não permitido.' });
   const actor = await getActor(req);
   if (!actor) return responseError(res, 401, 'Entre na sua conta para atualizar o torneio.');
+
+  if (req.body?.action === 'set-attendance') {
+    if (typeof req.body.checkedIn !== 'boolean') return responseError(res, 400, 'Estado do check-in inválido.');
+    try {
+      const admin = await getAdminClient();
+      if (!admin) return responseError(res, 503, 'Supabase server-side não está configurado.');
+      const { data, error } = await admin.rpc('set_tournament_attendance', {
+        p_actor_id: actor.appId,
+        p_checked_in: req.body.checkedIn,
+      });
+      if (error) {
+        if (error.code === '55000') return responseError(res, 409, error.message || 'O check-in desta temporada está encerrado.');
+        throw error;
+      }
+      if (!data || typeof data !== 'object') throw new Error('A resposta do check-in está vazia.');
+      return res.status(200).json({ state: data });
+    } catch (error) {
+      console.error('Falha ao salvar o check-in compartilhado:', error);
+      return responseError(res, 503, 'Não foi possível salvar o check-in. Tente novamente.');
+    }
+  }
+
   const state = req.body?.state;
   if (!validTournamentState(state)) return responseError(res, 400, 'Estado do torneio inválido.');
 
