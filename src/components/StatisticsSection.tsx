@@ -3,6 +3,7 @@ import { ActiveSeason, CardItem, EloTier, Lane, MatchRecord, SeasonArchive, User
 import { BarChart3, CalendarClock, CheckCircle2, ScanLine, Search, Trophy } from 'lucide-react';
 import { getTierFromScore } from '../data/initialData';
 import { RouteDistribution } from './RouteDistribution';
+import { displayLogin } from '../utils/userIdentity';
 
 interface StatisticsSectionProps {
   users: User[];
@@ -231,7 +232,7 @@ export const StatisticsSection: React.FC<StatisticsSectionProps> = ({
               <span className="col-span-2 flex min-w-0 items-center gap-2 sm:col-span-3">
                 <span className="w-7 shrink-0 font-mono text-[10px] font-bold text-slate-500">{String(index + 1).padStart(2, '0')}</span>
                 <img src={user.avatar} alt="" className="h-8 w-8 shrink-0 rounded-lg object-cover" />
-                <span className="min-w-0"><span className="block truncate text-xs font-bold text-white">{user.name}</span><span className="block truncate font-mono text-[9px] text-slate-500">{count ? `${count} ${count === 1 ? 'partida' : 'partidas'} · ${user.riotId || user.handle}` : `${user.riotId || user.handle} · Sem partidas`}</span></span>
+                <span className="min-w-0"><span className="block truncate text-xs font-bold text-white">{user.name}</span><span className="block truncate font-mono text-[9px] text-slate-500">{count ? `${count} ${count === 1 ? 'partida' : 'partidas'} · ${user.riotId || displayLogin(user.handle)}` : `${user.riotId || displayLogin(user.handle)} · Sem partidas`}</span></span>
               </span>
               <MatchMetric label="KDA" value={kda === null ? '—' : kda.toFixed(2)} />
               <MatchMetric label="K / D / A" value={count ? `${averageKills!.toFixed(1)} / ${averageDeaths!.toFixed(1)} / ${averageAssists!.toFixed(1)}` : '—'} />

@@ -3,6 +3,7 @@ import { User, CardItem, Lane, SeasonArchive, EloTier, VoteRecord, MatchRecord, 
 import { getTierFromScore } from '../data/initialData';
 import { RankedCard } from './RankedCard';
 import { TierCardOrnamentSettings } from '../utils/cardOrnament';
+import { displayLogin, normalizeHandle } from '../utils/userIdentity';
 import { formatGold, formatKda } from '../utils/stats';
 import {
   Calculator,
@@ -99,7 +100,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onOpenReportModal,
 }) => {
   const [name, setName] = useState(user.name);
-  const [handle, setHandle] = useState(user.handle);
+  const [handle, setHandle] = useState(displayLogin(user.handle));
   const [avatar, setAvatar] = useState(user.avatar.startsWith('data:') ? '' : user.avatar);
   const [bio, setBio] = useState(user.bio);
   const [favoriteChampion, setFavoriteChampion] = useState(user.favoriteChampion);
@@ -169,9 +170,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   if (!isOpen) return null;
 
   const handleSave = async () => {
-    const normalizedHandle = `@${handle.trim().replace(/^@+/, '')}`;
-    if (normalizedHandle.length < 2) {
-      setProfileSaveError('Informe um @ válido para seu perfil.');
+    const normalizedHandle = normalizeHandle(handle);
+    if (normalizedHandle.length < 3) {
+      setProfileSaveError('Informe um login válido para seu perfil.');
       return;
     }
     setProfileSaveError(null);
@@ -305,7 +306,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             <div className="min-w-0">
               <h2 id="player-profile-title" className="flex flex-wrap items-center gap-2 font-display text-base font-black text-white sm:text-lg">
                 <span className="truncate">{user.name}</span>
-                <span className="rounded-full border border-red-800 bg-red-950 px-2 py-0.5 font-mono text-[10px] text-red-300">{user.handle}</span>
+                <span className="rounded-full border border-red-800 bg-red-950 px-2 py-0.5 font-mono text-[10px] text-red-300">{displayLogin(user.handle)}</span>
               </h2>
               <p className="text-xs text-slate-400">Média atual <strong className={currentAverage === null ? 'text-slate-500' : 'text-amber-300'}>{currentAverage ?? '—'}</strong>{tier ? ` · ${tierLabels[tier]}` : ' · Sem média registrada'}</p>
             </div>
@@ -364,8 +365,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 <label className="text-slate-300">Nome no site
                   <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 p-2.5 text-white" />
                 </label>
-                <label className="text-slate-300">Seu @ no site
-                  <input value={handle} onChange={(event) => { setHandle(event.target.value); setProfileSaveError(null); }} placeholder="@nick" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 p-2.5 font-mono text-white" />
+                <label className="text-slate-300">Login
+                  <input value={handle} onChange={(event) => { setHandle(event.target.value); setProfileSaveError(null); }} placeholder="nick" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 p-2.5 font-mono text-white" />
                 </label>
                 <div className="md:col-span-2">
                   <span className="text-slate-300">Foto do perfil</span>
@@ -529,7 +530,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                           <img src={comment.authorAvatar} alt="" className="mt-0.5 h-8 w-8 shrink-0 rounded-full object-cover" />
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center justify-between gap-2">
-                              <div className="flex items-center gap-1.5"><strong className="text-white">{comment.authorName}</strong><span className="font-mono text-[10px] text-slate-400">{comment.authorHandle}</span></div>
+                              <div className="flex items-center gap-1.5"><strong className="text-white">{comment.authorName}</strong><span className="font-mono text-[10px] text-slate-400">{displayLogin(comment.authorHandle)}</span></div>
                               <div className="flex items-center gap-2">
                                 {comment.scoreGiven !== undefined && <span className="rounded border border-amber-500/30 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">Nota {comment.scoreGiven}</span>}
                                 {canDeleteComments && <button type="button" onClick={() => onDeleteComment(user.id, comment.id)} aria-label={`Excluir comentário de ${comment.authorName}`} className="rounded p-1 text-slate-500 transition hover:bg-red-950 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button>}
@@ -623,7 +624,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                       <img src={comment.authorAvatar} alt="" className="mt-0.5 h-8 w-8 shrink-0 rounded-full object-cover" />
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5"><strong className="text-white">{comment.authorName}</strong><span className="font-mono text-[10px] text-slate-400">{comment.authorHandle}</span></div>
+                          <div className="flex items-center gap-1.5"><strong className="text-white">{comment.authorName}</strong><span className="font-mono text-[10px] text-slate-400">{displayLogin(comment.authorHandle)}</span></div>
                           <div className="flex items-center gap-2">
                             {comment.scoreGiven !== undefined && <span className="rounded border border-amber-500/30 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">Nota {comment.scoreGiven}</span>}
                             {canDeleteComments && <button type="button" onClick={() => onDeleteComment(user.id, comment.id)} aria-label={`Excluir comentário de ${comment.authorName}`} className="rounded p-1 text-slate-500 transition hover:bg-red-950 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button>}

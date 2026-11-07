@@ -5,6 +5,7 @@ import { GoogleGenAI } from '@google/genai';
 import { parseOcrMatchStats } from './src/utils/matchStats';
 import { generateOcrWithFallback, getGeminiOcrError } from './server/geminiOcr';
 import { signInWithLogin } from './server/authLogin';
+import { registerWithLogin } from './server/authRegister';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -121,6 +122,11 @@ async function startServer() {
 
   app.post('/api/auth/login', async (req, res) => {
     const result = await signInWithLogin(req.body?.login, req.body?.password, req.ip || 'local');
+    return res.status(result.status).json(result.body);
+  });
+
+  app.post('/api/auth/register', async (req, res) => {
+    const result = await registerWithLogin(req.body || {}, req.ip || 'local');
     return res.status(result.status).json(result.body);
   });
 

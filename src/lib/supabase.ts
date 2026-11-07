@@ -297,7 +297,7 @@ export async function saveSharedPlayerMatchRecord(record: Omit<MatchRecord, 'id'
   if (error) throw error;
 }
 
-function profileToUser(profile: ProfileRow, email?: string): User {
+function profileToUser(profile: ProfileRow): User {
   const legacy = INITIAL_USERS.find((user) => normalizeHandle(user.handle) === normalizeHandle(profile.handle));
   const createdAt = profile.created_at || new Date().toISOString();
   return {
@@ -306,7 +306,6 @@ function profileToUser(profile: ProfileRow, email?: string): User {
     authId: profile.id,
     handle: normalizeHandle(profile.handle),
     name: profile.name,
-    ...(email ? { email } : {}),
     // Legacy moderator/captain profile roles are now ordinary player accounts.
     role: profile.role === 'criador' ? 'criador' : 'jogador',
     isOnline: false,
@@ -338,7 +337,7 @@ export async function loadAuthenticatedProfile(authUser: AuthUser): Promise<User
   if (!supabase) throw new Error('O cadastro compartilhado ainda não está configurado.');
   const { data, error } = await supabase.from('profiles').select(PROFILE_FIELDS).eq('id', authUser.id).single();
   if (error) throw error;
-  return profileToUser(data as ProfileRow, authUser.email || undefined);
+  return profileToUser(data as ProfileRow);
 }
 
 export async function saveAuthenticatedProfile(user: User): Promise<void> {

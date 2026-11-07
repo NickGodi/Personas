@@ -80,9 +80,9 @@ export interface User {
   id: string;
   /** Supabase Auth UID for the signed-in account, when available. */
   authId?: string;
-  handle: string; // @handle unico
+  /** Canonical internal login key; the UI shows this without the leading @. */
+  handle: string;
   name: string;
-  email?: string; // identificador de login privado e único quando informado
   role: UserRole;
   isOnline: boolean;
   lastSeenAt?: string | null;

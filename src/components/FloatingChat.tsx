@@ -78,7 +78,7 @@ export const FloatingChat: React.FC<FloatingChatProps> = ({
                   Patinho Real (Mascote)
                 </span>
                 <p className="text-slate-200 text-[11px] leading-relaxed">
-                  Quack! Seja bem-vindo ao Personas. Qualquer mensagem digitada aqui gera uma notificação direta no painel do Criador (@nicolaslike)!
+                  Quack! Seja bem-vindo ao Personas. Qualquer mensagem digitada aqui gera uma notificação direta no painel do Criador!
                 </p>
               </div>
             </div>

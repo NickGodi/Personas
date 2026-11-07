@@ -675,7 +675,7 @@ export const PERSONAS_RULES = {
       title: '5. Ética, Conduta e Sistema de Denúncias',
       items: [
         'Qualquer conduta antidesportiva, rage quit ou manipulação de votos pode ser denunciada diretamente no botão de Denúncia.',
-        'Todas as denúncias são encaminhadas instantaneamente para o Painel do Criador (@nicolas) para auditoria e deliberação.'
+        'Todas as denúncias são encaminhadas instantaneamente para o Painel do Criador para auditoria e deliberação.'
       ]
     }
   ]

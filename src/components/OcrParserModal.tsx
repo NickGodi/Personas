@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { MatchResult, User, UserStats } from '../types';
 import { getSupabaseAuthorizationHeaders } from '../lib/supabase';
+import { displayLogin } from '../utils/userIdentity';
 import { sound } from '../utils/audio';
 import { isCompleteMatchStats, matchOcrPlayerName, parseOcrMatchStats, type ExtractedMatchStats } from '../utils/matchStats';
 import { AlertCircle, CheckCircle2, Coins, Loader2, Scan, Save, Swords, Upload, Users } from 'lucide-react';
@@ -251,11 +252,11 @@ export const OcrParserModal: React.FC<OcrParserModalProps> = ({ isOpen, onClose,
                 <label className="text-xs font-semibold text-slate-300">Perfil correspondente
                   <select value={extractedData.matchedUserId || ''} onChange={(event) => setExtractedData({ ...extractedData, matchedUserId: event.target.value || undefined, ambiguousMatch: false })} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-sky-400">
                     <option value="">Selecione o jogador</option>
-                    {users.map((user) => <option key={user.id} value={user.id}>{user.name} ({user.handle})</option>)}
+                    {users.map((user) => <option key={user.id} value={user.id}>{user.name} ({displayLogin(user.handle)})</option>)}
                   </select>
                 </label>
               </div>
-              {selectedUser && <p className="text-xs text-emerald-300">Correspondência: {selectedUser.name} · {selectedUser.handle}</p>}
+              {selectedUser && <p className="text-xs text-emerald-300">Correspondência: {selectedUser.name} · {displayLogin(selectedUser.handle)}</p>}
               {!selectedUser && <p className="text-xs text-amber-300">{extractedData.ambiguousMatch ? 'O nome combina com mais de um perfil. Escolha a pessoa correta.' : 'Não encontrei uma correspondência única. Escolha o perfil correto acima.'}</p>}
 
               <fieldset className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">

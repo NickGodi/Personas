@@ -1,5 +1,6 @@
 import React from 'react';
 import { Lane, User, VoteRecord } from '../types';
+import { displayLogin } from '../utils/userIdentity';
 import { Award, Check, MessageSquare, Plus, RotateCcw, ShieldAlert, Sparkles, Star, UserPlus, Users, X } from 'lucide-react';
 
 interface VotingSectionProps {
@@ -152,11 +153,11 @@ export const VotingSection: React.FC<VotingSectionProps> = ({ users, currentUser
               const name = newPlayerName.trim();
               const handle = `@${newPlayerHandle.trim().replace(/^@+/, '')}`;
               if (!name || handle.length < 2) {
-                setAddPlayerError('Informe o nome e um @ válido.');
+                setAddPlayerError('Informe o nome e um login válido.');
                 return;
               }
               if (users.some((user) => user.handle.toLowerCase() === handle.toLowerCase())) {
-                setAddPlayerError('Esse @ já está em uso por outro jogador.');
+                setAddPlayerError('Esse login já está em uso por outro jogador.');
                 return;
               }
               const error = onAddPlayer({
@@ -183,8 +184,8 @@ export const VotingSection: React.FC<VotingSectionProps> = ({ users, currentUser
               <input required value={newPlayerName} onChange={(event) => setNewPlayerName(event.target.value)} placeholder="Ex.: Alex" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white placeholder:text-slate-600" />
             </label>
             <label className="text-[10px] font-semibold text-slate-400">
-              @ do jogador *
-              <input required value={newPlayerHandle} onChange={(event) => setNewPlayerHandle(event.target.value)} placeholder="@alex" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white placeholder:text-slate-600" />
+              Login do jogador *
+              <input required value={newPlayerHandle} onChange={(event) => setNewPlayerHandle(event.target.value)} placeholder="alex" className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white placeholder:text-slate-600" />
             </label>
             <label className="text-[10px] font-semibold text-slate-400">
               Riot ID
@@ -226,7 +227,7 @@ export const VotingSection: React.FC<VotingSectionProps> = ({ users, currentUser
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-bold text-white group-hover:text-amber-300">{user.name}</span>
-                  <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-500">{user.handle} · {voteCount} {voteCount === 1 ? 'voto' : 'votos'} · {user.comments?.length || 0} comentários</span>
+                  <span className="mt-0.5 block truncate font-mono text-[10px] text-slate-500">{displayLogin(user.handle)} · {voteCount} {voteCount === 1 ? 'voto' : 'votos'} · {user.comments?.length || 0} comentários</span>
                 </span>
                 <span className="hidden w-28 sm:block">
                   {average === null ? <span className="text-[10px] text-slate-500">Sem média</span> : <>

@@ -492,6 +492,15 @@ async function dispatch(req: ExpressRequest, res: ExpressResponse) {
       const result = await signInWithLogin(req.body?.login, req.body?.password, clientIp);
       return res.status(result.status).json(result.body);
     }
+    if (route === 'auth/register' && req.method === 'POST') {
+      const headers = req.headers as unknown as Headers & Record<string, string | string[] | undefined>;
+      const forwardedFor = typeof headers.get === 'function' ? headers.get('x-forwarded-for') : headers['x-forwarded-for'];
+      const forwardedIps = String(forwardedFor || '').split(',');
+      const clientIp = forwardedIps[forwardedIps.length - 1]?.trim() || 'unknown';
+      const { registerWithLogin } = await import('./authRegister.ts');
+      const result = await registerWithLogin(req.body || {}, clientIp);
+      return res.status(result.status).json(result.body);
+    }
     if (route === 'tournament-state') return handleTournament(req, res);
     if (route === 'reset-seasons') return handleResetAllSeasons(req, res);
     if (route === 'presence') return handlePresence(req, res);

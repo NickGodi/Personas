@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { User, NotificationItem, TestRole } from '../types';
+import { displayLogin } from '../utils/userIdentity';
 import mascotAvatar from '../assets/images/personas_duck_mascot_1793729518059.jpg';
 import { 
   Bell, 
@@ -137,14 +138,14 @@ export const Navbar: React.FC<NavbarProps> = ({
           <div className="flex items-center gap-2">
             <UserCheck className="w-4 h-4" />
             <span>
-              Você está mexendo na conta de <strong>{currentUser.name} ({currentUser.handle})</strong> com permissões de Criador.
+              Você está mexendo na conta de <strong>{currentUser.name} ({displayLogin(currentUser.handle)})</strong> com permissões de Criador.
             </span>
           </div>
           <button
             onClick={onStopImpersonating}
             className="px-2.5 py-0.5 rounded bg-black text-amber-300 hover:text-white font-mono text-[11px] transition-colors"
           >
-            Voltar para o Criador (@{creatorUser.handle.replace('@', '')})
+            Voltar para o Criador ({displayLogin(creatorUser.handle)})
           </button>
         </div>
       )}
@@ -375,7 +376,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 />
                 <div className="text-left hidden sm:block">
                   <div className="text-xs font-bold leading-none">{currentUser.name}</div>
-                  <div className="text-[10px] text-slate-400 font-mono">{currentUser.handle}</div>
+                  <div className="text-[10px] text-slate-400 font-mono">{displayLogin(currentUser.handle)}</div>
                 </div>
                 <ChevronDown className={`h-3.5 w-3.5 text-slate-400 transition-transform ${showAccountMenu ? 'rotate-180' : ''}`} />
               </button>

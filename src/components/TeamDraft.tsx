@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { User, Team, DraftPreset, EloTier, Lane, MatchSeriesFormat, SharedTournamentState, TeamDraftMode, VoteRecord } from '../types';
 import { getTierFromScore } from '../data/initialData';
+import { displayLogin } from '../utils/userIdentity';
 import { rouletteSound } from '../utils/audio';
 import { 
   Users, 
@@ -657,7 +658,7 @@ export const TeamDraft: React.FC<TeamDraftProps> = ({
                 <option value="" disabled>Selecione o Capitão...</option>
                 {users.filter((u) => attendeeIds.includes(u.id)).map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.name} ({u.primaryLane} · {u.handle})
+                    {u.name} ({u.primaryLane} · {displayLogin(u.handle)})
                   </option>
                 ))}
               </select>
@@ -707,7 +708,7 @@ export const TeamDraft: React.FC<TeamDraftProps> = ({
                 </> : <div className="rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-xs font-bold text-white">{captain ? `${captain.name} · ${captain.primaryLane} · ${pointsLabel(captain.id)}` : 'Aguardando o criador escolher um capitão'}</div>}
                 {captain && <div className="mt-3 flex items-center gap-2 rounded-xl bg-slate-950/70 p-2">
                   <img src={captain.avatar} alt="" className="h-9 w-9 rounded-lg object-cover" />
-                  <span className="min-w-0"><strong className="block truncate text-xs text-white">{captain.name}</strong><span className="font-mono text-[10px] text-slate-400">{captain.handle} · {pointsLabel(captain.id)}</span></span>
+                  <span className="min-w-0"><strong className="block truncate text-xs text-white">{captain.name}</strong><span className="font-mono text-[10px] text-slate-400">{displayLogin(captain.handle)} · {pointsLabel(captain.id)}</span></span>
                 </div>}
               </section>
             );
@@ -965,7 +966,7 @@ export const TeamDraft: React.FC<TeamDraftProps> = ({
               <input
                 value={freeAgentSearch}
                 onChange={(event) => setFreeAgentSearch(event.target.value)}
-                placeholder="Pesquisar nome, @ ou rota"
+                placeholder="Pesquisar nome, login ou rota"
                 className="w-full rounded-xl border border-slate-700 bg-slate-900 py-2 pl-9 pr-3 text-xs text-white placeholder:text-slate-500"
               />
             </label>

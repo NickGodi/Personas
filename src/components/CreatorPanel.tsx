@@ -4,6 +4,7 @@ import { User, UserRole, CardItem, CardOrnamentSettings, MatchDeckCard, ReportIt
 import { BackgroundImageField } from './BackgroundImageField';
 import { CardOrnamentEditor } from './CardOrnamentEditor';
 import { DEFAULT_CARD_ORNAMENT_SETTINGS, TierCardOrnamentSettings } from '../utils/cardOrnament';
+import { displayLogin } from '../utils/userIdentity';
 import { 
   Users, 
   Sliders, 
@@ -247,7 +248,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
             </span>
             <div>
               <h2 className="text-xl md:text-2xl font-display font-black text-white tracking-wide">
-                Painel do Criador Supremo (@{currentCreatorUser.handle.replace('@', '')})
+                Painel do Criador Supremo ({displayLogin(currentCreatorUser.handle)})
               </h2>
               <p className="text-xs text-slate-400">
                 Acesso irrestrito a todos os jogadores, datas de entrada, impersonação e simulador de cargos
@@ -343,7 +344,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
               <input
                 type="text"
-                placeholder="Buscar por jogador, @handle ou cargo..."
+                placeholder="Buscar por jogador, login ou cargo..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-red-500"
@@ -386,7 +387,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                             {u.name}
                             {u.isLegend && <Sparkles className="w-3.5 h-3.5 text-amber-400" />}
                           </div>
-                          <div className="text-[11px] font-mono text-slate-400">{u.handle}</div>
+                          <div className="text-[11px] font-mono text-slate-400">{displayLogin(u.handle)}</div>
                         </div>
                       </div>
                     </td>
@@ -540,7 +541,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                       />
                       <div>
                         <div className="font-bold text-white text-xs">{u.name}</div>
-                        <div className="text-[10px] font-mono text-slate-400">{u.handle}</div>
+                        <div className="text-[10px] font-mono text-slate-400">{displayLogin(u.handle)}</div>
                       </div>
                     </div>
 
@@ -716,11 +717,11 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                         {rep.reason}
                       </span>
                       <span className="text-xs text-slate-400">
-                        Denunciante: <strong className="text-white">{rep.reporterHandle}</strong>
+                        Denunciante: <strong className="text-white">{displayLogin(rep.reporterHandle)}</strong>
                       </span>
                       <span className="text-slate-500">→</span>
                       <span className="text-xs text-slate-400">
-                        Acusado: <strong className="text-red-400">{rep.targetUserName} ({rep.targetUserHandle})</strong>
+                        Acusado: <strong className="text-red-400">{rep.targetUserName} ({displayLogin(rep.targetUserHandle)})</strong>
                       </span>
                     </div>
                     <p className="text-xs text-slate-200 mt-1">"{rep.details}"</p>
@@ -790,7 +791,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                   <div className="flex items-center justify-between mb-0.5">
                     <div className="flex items-center gap-1.5">
                       <span className="font-bold text-white">{m.senderName}</span>
-                      <span className="text-[10px] font-mono text-slate-400">{m.senderHandle}</span>
+                      <span className="text-[10px] font-mono text-slate-400">{displayLogin(m.senderHandle)}</span>
                     </div>
                     <span className="text-[10px] font-mono text-slate-500">{m.timestamp}</span>
                   </div>
@@ -876,10 +877,10 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
               </div>
 
               <div>
-                <label className="text-slate-400 block mb-1">@Handle Único:</label>
+                <label className="text-slate-400 block mb-1">Login:</label>
                 <input
                   type="text"
-                  value={editingUser.handle}
+                  value={displayLogin(editingUser.handle)}
                   onChange={(e) => { setEditingUser({ ...editingUser, handle: e.target.value }); setEditingUserError(null); }}
                   className="w-full p-2 rounded bg-slate-950 border border-slate-700 text-white font-mono"
                 />

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, ReportItem } from '../types';
 import { sound } from '../utils/audio';
+import { displayLogin } from '../utils/userIdentity';
 import { AlertOctagon, X, Send, ShieldAlert } from 'lucide-react';
 
 interface ReportModalProps {
@@ -63,7 +64,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         </div>
 
         <p className="text-xs text-slate-400 mt-2">
-          Sua denúncia será enviada com prioridade máxima diretamente para o Painel do Criador (@nicolaslike).
+          Sua denúncia será enviada com prioridade máxima diretamente para o Painel do Criador.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4 text-xs">
@@ -80,7 +81,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                 .filter((u) => u.id !== currentUser?.id)
                 .map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.name} ({u.handle}) - Rota {u.primaryLane}
+                    {u.name} ({displayLogin(u.handle)}) - Rota {u.primaryLane}
                   </option>
                 ))}
             </select>

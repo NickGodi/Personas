@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { CardItem, CardOrnamentSettings, EloTier } from '../types';
 import { Sparkles, Flame, Star, Trophy, Award } from 'lucide-react';
 import { formatGold, formatKda } from '../utils/stats';
+import { displayLogin } from '../utils/userIdentity';
 import { DEFAULT_CARD_ORNAMENT_SETTINGS, normalizeCardOrnamentSettings } from '../utils/cardOrnament';
 import rankCardFrameNoMvp from '../assets/images/personas-rank-card-frame-complete.png';
 import rankCardFrameMvp from '../assets/images/personas-rank-card-frame-mvp.png';
@@ -412,7 +413,7 @@ export const RankedCard: React.FC<RankedCardProps> = ({
               <h3 className="font-display font-extrabold text-sm md:text-base tracking-wider text-[#4a3b18] uppercase truncate">
                 {card.userName}
               </h3>
-              <p className="text-[10px] font-mono text-slate-500">{card.userHandle}</p>
+              <p className="text-[10px] font-mono text-slate-500">{displayLogin(card.userHandle)}</p>
             </div>
 
             <CardCombatStats card={card} light />

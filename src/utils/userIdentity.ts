@@ -7,7 +7,8 @@ export const normalizeHandle = (value: string): string => {
   return clean ? `@${clean}` : '';
 };
 
-export const normalizeEmail = (value?: string): string => (value || '').trim().toLocaleLowerCase('pt-BR');
+/** Display-only login; the canonical database handle remains prefixed internally. */
+export const displayLogin = (value: string): string => value.trim().replace(/^@+/, '');
 
 export const normalizeRiotId = (value: string): string => value.trim().replace(/\s*#\s*/g, '#').toLocaleLowerCase('pt-BR');
 
@@ -15,23 +16,14 @@ export const validateUniqueUserIdentity = (users: User[], candidate: User, creat
   const handle = normalizeHandle(candidate.handle);
   const handleName = handle.slice(1);
   if (!/^[a-z0-9._-]{2,24}$/.test(handleName)) {
-    return 'O @ deve ter de 2 a 24 caracteres: letras, números, ponto, hífen ou sublinhado.';
+    return 'O login deve ter de 2 a 24 caracteres: letras, números, ponto, hífen ou sublinhado.';
   }
   if (candidate.id !== creatorId && CREATOR_LOGIN_ALIASES.has(handleName)) {
     return 'Esse login é reservado à conta do criador.';
   }
 
   const duplicateHandle = users.find((user) => user.id !== candidate.id && normalizeHandle(user.handle) === handle);
-  if (duplicateHandle) return `O ${handle} já pertence a ${duplicateHandle.name}. Escolha outro @.`;
-
-  const email = normalizeEmail(candidate.email);
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return 'Informe um e-mail válido.';
-  }
-  if (email) {
-    const duplicateEmail = users.find((user) => user.id !== candidate.id && normalizeEmail(user.email) === email);
-    if (duplicateEmail) return `Esse e-mail já está vinculado à conta de ${duplicateEmail.name}.`;
-  }
+  if (duplicateHandle) return `O login "${handleName}" já pertence a ${duplicateHandle.name}. Escolha outro login.`;
 
   const riotId = normalizeRiotId(candidate.riotId);
   if (riotId) {

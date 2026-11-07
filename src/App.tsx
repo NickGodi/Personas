@@ -49,7 +49,7 @@ import mascotAvatar from './assets/images/personas_duck_mascot_1793729518059.jpg
 import { readStorage, writeStorage } from './utils/storage';
 import { CARD_ORNAMENT_SETTINGS_VERSION, CARD_ORNAMENT_SETTINGS_VERSION_KEY, CARD_ORNAMENT_STORAGE_KEY, DEFAULT_CARD_ORNAMENT_SETTINGS, loadCardOrnamentSettings, loadTierCardOrnamentSettings, migrateCardOrnamentSettings, normalizeCardOrnamentSettings, normalizeTierCardOrnamentSettings, ORNAMENT_TIER_ORDER, TIER_CARD_ORNAMENT_STORAGE_KEY } from './utils/cardOrnament';
 import { formatGold, formatKda, normalizeStats } from './utils/stats';
-import { normalizeEmail, normalizeHandle, normalizeRiotId, validateUniqueUserIdentity } from './utils/userIdentity';
+import { displayLogin, normalizeHandle, normalizeRiotId, validateUniqueUserIdentity } from './utils/userIdentity';
 import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, loadSharedNotifications, loadSharedPlayerMatchRecords, loadSharedSeasonControl, loadSharedSeasonVotes, mergeRegisteredProfiles, saveAuthenticatedProfile, saveSharedCardOrnamentSettings, saveSharedNotification, saveSharedPlayerMatchRecord, saveSharedPlayerMatchStats, saveSharedSeasonControl, saveSharedSeasonVote, setSharedNotificationRead, deleteSharedNotification, deleteAllSharedNotifications, deleteSharedSeasonVotes } from './lib/supabase';
 import { 
   Sparkles, 
@@ -178,7 +178,7 @@ const ProfileOnlyCard: React.FC<{ user: User; onClick: () => void }> = ({ user, 
     </span>
     <span className="flex flex-1 flex-col items-center justify-center border-t border-slate-800 px-4 py-5 text-center">
       <span className="max-w-full truncate font-display text-lg font-black uppercase tracking-wide text-white group-hover:text-amber-200">{user.name}</span>
-      <span className="mt-1 font-mono text-xs text-slate-400">{user.handle}</span>
+      <span className="mt-1 font-mono text-xs text-slate-400">{displayLogin(user.handle)}</span>
       <span className="mt-4 rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
         {user.primaryLane === 'JUNGLE' ? 'JUNGLER' : user.primaryLane === 'PREENCHER' ? 'PREENCHER' : user.primaryLane}
       </span>
@@ -397,13 +397,13 @@ const loadInitialCards = (): CardItem[] => {
 
 const normalizeUserList = (users: User[]): User[] => {
   const usedHandles = new Set<string>();
-  const usedEmails = new Set<string>();
   const usedRiotIds = new Set<string>();
   const reservedCreatorLogins = new Set(['nicolas', 'nicolaslike']);
   return users.map((user) => {
-    const normalized = { ...user } as User & { password?: string };
+    const normalized = { ...user } as User & { password?: string; email?: string };
     // Remove any plaintext passwords left by older local demo builds.
     delete normalized.password;
+    delete normalized.email;
     delete normalized.secondaryLane;
     const knownLanes = ['TOP', 'JUNGLE', 'MID', 'ADC', 'SUPORTE', 'PREENCHER'];
     let handle = normalizeHandle(user.handle);
@@ -421,10 +421,6 @@ const normalizeUserList = (users: User[]): User[] => {
       uniqueHandle = `@${baseHandle}-${handleSuffix++}`;
     }
     usedHandles.add(uniqueHandle);
-
-    let email = normalizeEmail(user.email);
-    if (email && usedEmails.has(email)) email = '';
-    if (email) usedEmails.add(email);
 
     let riotId = user.riotId.trim();
     if (user.id === 'user_nick' && normalizeRiotId(riotId) === 'nick#br1') riotId = 'NickPresidiario#BR1';
@@ -444,7 +440,6 @@ const normalizeUserList = (users: User[]): User[] => {
       // Criminal status belongs to a completed season card, never to a live player profile.
       isCriminoso: false,
       handle: uniqueHandle,
-      email: email || undefined,
       riotId: uniqueRiotId,
       stats: normalizeStats(user.stats),
     };
@@ -1976,7 +1971,6 @@ export default function App() {
       ...updated,
       id: existing?.id || updated.id,
       handle: normalizeHandle(updated.handle),
-      email: normalizeEmail(updated.email) || undefined,
       riotId: updated.riotId.trim(),
       stats: normalizeStats(updated.stats),
     };
@@ -3019,7 +3013,7 @@ export default function App() {
             <span>·</span>
           </div>
           <div className="flex items-center gap-3 text-slate-400">
-            <span>Criador: @{creatorUser.handle.replace(/^@+/, '')}</span>
+            <span>Criador: {displayLogin(creatorUser.handle)}</span>
           </div>
         </div>
       </footer>
