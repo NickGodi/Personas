@@ -508,7 +508,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                             onClick={async () => {
                               const login = displayLogin(u.handle);
                               const confirmed = window.confirm(
-                                `Excluir permanentemente a conta de ${u.name} (${login})? O perfil e o acesso ao site serão removidos. Os registros históricos de temporadas serão mantidos.`,
+                                `Excluir permanentemente a conta de ${u.name} (${login})? O perfil e o acesso serão removidos; votos enviados por esta conta e notificações vinculadas também serão apagados. As partidas importadas permanecem no histórico.`,
                               );
                               if (!confirmed) return;
                               setDeleteAccountError(null);
