@@ -208,6 +208,20 @@ export async function getSupabaseAuthorizationHeaders(): Promise<Record<string, 
   return accessToken ? { Authorization: `Bearer ${accessToken}` } : {};
 }
 
+export async function deleteRegisteredAccount(targetAuthId: string): Promise<void> {
+  if (!supabase) throw new Error('As contas compartilhadas não estão configuradas neste servidor.');
+  const authorization = await getSupabaseAuthorizationHeaders();
+  if (!authorization.Authorization) throw new Error('Entre na conta do criador para excluir uma conta.');
+
+  const response = await fetch('/api/admin/delete-account', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authorization },
+    body: JSON.stringify({ targetAuthId }),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(payload?.error || 'Não foi possível excluir esta conta.');
+}
+
 type ProfileRow = {
   id: string;
   handle: string;

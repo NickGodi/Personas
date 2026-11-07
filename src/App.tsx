@@ -50,7 +50,7 @@ import { readStorage, writeStorage } from './utils/storage';
 import { CARD_ORNAMENT_SETTINGS_VERSION, CARD_ORNAMENT_SETTINGS_VERSION_KEY, CARD_ORNAMENT_STORAGE_KEY, DEFAULT_CARD_ORNAMENT_SETTINGS, loadCardOrnamentSettings, loadTierCardOrnamentSettings, migrateCardOrnamentSettings, normalizeCardOrnamentSettings, normalizeTierCardOrnamentSettings, ORNAMENT_TIER_ORDER, TIER_CARD_ORNAMENT_STORAGE_KEY } from './utils/cardOrnament';
 import { formatGold, formatKda, normalizeStats } from './utils/stats';
 import { displayLogin, normalizeHandle, normalizeRiotId, validateUniqueUserIdentity } from './utils/userIdentity';
-import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, loadSharedNotifications, loadSharedPlayerMatchRecords, loadSharedSeasonControl, loadSharedSeasonVotes, mergeRegisteredProfiles, saveAuthenticatedProfile, saveSharedCardOrnamentSettings, saveSharedNotification, saveSharedPlayerMatchRecord, saveSharedPlayerMatchStats, saveSharedSeasonControl, saveSharedSeasonVote, setSharedNotificationRead, deleteSharedNotification, deleteAllSharedNotifications, deleteSharedSeasonVotes } from './lib/supabase';
+import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, loadSharedNotifications, loadSharedPlayerMatchRecords, loadSharedSeasonControl, loadSharedSeasonVotes, mergeRegisteredProfiles, saveAuthenticatedProfile, saveSharedCardOrnamentSettings, saveSharedNotification, saveSharedPlayerMatchRecord, saveSharedPlayerMatchStats, saveSharedSeasonControl, saveSharedSeasonVote, setSharedNotificationRead, deleteSharedNotification, deleteAllSharedNotifications, deleteSharedSeasonVotes, deleteRegisteredAccount } from './lib/supabase';
 import { 
   Sparkles, 
   Trophy, 
@@ -2060,6 +2060,34 @@ export default function App() {
     return null;
   };
 
+  const handleDeleteAccount = async (target: User): Promise<void> => {
+    if (!canAccessCreatorPanel || currentUser?.role !== 'criador' || isImpersonating) {
+      throw new Error('Somente o criador pode excluir contas.');
+    }
+    if (!target.authId || target.role === 'criador' || target.id === creatorUser.id) {
+      throw new Error('Esta conta não pode ser excluída por esta opção.');
+    }
+
+    await deleteRegisteredAccount(target.authId);
+
+    setUsers((previous) => previous.filter((user) => user.authId !== target.authId));
+    setNotifications((previous) => previous.filter((item) => item.userId !== target.id && item.userId !== target.authId));
+    setProfileModalTarget((previous) => previous && (previous.id === target.id || previous.authId === target.authId) ? null : previous);
+    updateSharedTournament((previous) => {
+      const isDeletedAccount = (id: string) => id === target.id || id === target.authId;
+      return {
+        attendeeIds: previous.attendeeIds.filter((id) => !isDeletedAccount(id)),
+        captainIds: previous.captainIds.map((id) => isDeletedAccount(id) ? '' : id) as [string, string],
+        playerPoolIds: previous.playerPoolIds.filter((id) => !isDeletedAccount(id)),
+        teams: previous.teams.map((team) => ({
+          ...team,
+          captainId: isDeletedAccount(team.captainId) ? '' : team.captainId,
+          members: team.members.filter((id) => !isDeletedAccount(id)),
+        })),
+      };
+    });
+  };
+
   const handleSaveProfile = async (updated: Partial<User>): Promise<string | null> => {
     const profile = (profileModalTarget && (
       users.find((user) => user.id === profileModalTarget.id)
@@ -2896,6 +2924,7 @@ export default function App() {
             onImpersonateUser={handleImpersonateUser}
             onOpenProfile={setProfileModalTarget}
             onUpdateUser={handleUpdateUser}
+            onDeleteAccount={handleDeleteAccount}
             onUpdateDeck={setDeck}
             onUpdateCards={setCards}
             onResolveReport={handleResolveReport}

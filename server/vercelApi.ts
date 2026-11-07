@@ -480,9 +480,42 @@ Interprete o KDA como abates/mortes/assistências, nesta ordem. Minions é o tot
   }
 }
 
+async function handleDeleteAccount(req: ExpressRequest, res: ExpressResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido.' });
+
+  const actor = await getActor(req);
+  if (!actor) return responseError(res, 401, 'Entre na conta do criador para excluir uma conta.');
+  if (actor.profile.role !== 'criador') return responseError(res, 403, 'Somente o criador pode excluir contas.');
+
+  const targetAuthId = typeof req.body?.targetAuthId === 'string' ? req.body.targetAuthId.trim() : '';
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetAuthId)) {
+    return responseError(res, 400, 'A conta selecionada é inválida.');
+  }
+  if (targetAuthId === actor.authUser.id) return responseError(res, 400, 'Você não pode excluir a própria conta do criador.');
+
+  const admin = await getAdminClient();
+  if (!admin) return responseError(res, 503, 'A exclusão de contas não está configurada no servidor.');
+
+  try {
+    const { data: targetProfile, error: profileError } = await admin.from('profiles')
+      .select('id,role').eq('id', targetAuthId).maybeSingle();
+    if (profileError) throw profileError;
+    if (!targetProfile) return responseError(res, 404, 'A conta selecionada não foi encontrada.');
+    if (targetProfile.role === 'criador') return responseError(res, 403, 'Esta opção não pode excluir uma conta de criador.');
+
+    const { error: deleteError } = await admin.auth.admin.deleteUser(targetAuthId);
+    if (deleteError) throw deleteError;
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Falha ao excluir conta pelo painel do criador:', error);
+    return responseError(res, 500, 'Não foi possível excluir esta conta. Tente novamente.');
+  }
+}
+
 async function dispatch(req: ExpressRequest, res: ExpressResponse) {
   try {
     const route = getRoutePath(req);
+    if (route === 'admin/delete-account') return handleDeleteAccount(req, res);
     if (route === 'auth/login' && req.method === 'POST') {
       const headers = req.headers as unknown as Headers & Record<string, string | string[] | undefined>;
       const forwardedFor = typeof headers.get === 'function' ? headers.get('x-forwarded-for') : headers['x-forwarded-for'];

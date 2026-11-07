@@ -68,6 +68,7 @@ interface CreatorPanelProps {
   onImpersonateUser: (user: User) => void;
   onOpenProfile: (user: User) => void;
   onUpdateUser: (updatedUser: User) => string | null;
+  onDeleteAccount: (user: User) => Promise<void>;
   onUpdateDeck: (updatedDeck: MatchDeckCard[]) => void;
   onUpdateCards: (updatedCards: CardItem[]) => void;
   onResolveReport: (reportId: string, status: 'resolvido' | 'descartado') => void;
@@ -96,6 +97,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
   onImpersonateUser,
   onOpenProfile,
   onUpdateUser,
+  onDeleteAccount,
   onUpdateDeck,
   onUpdateCards,
   onResolveReport,
@@ -113,6 +115,8 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editingUserError, setEditingUserError] = useState<string | null>(null);
+  const [deletingAccountId, setDeletingAccountId] = useState<string | null>(null);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
   const [editingDeckCard, setEditingDeckCard] = useState<MatchDeckCard | null>(null);
   const [editingDeckImage, setEditingDeckImage] = useState<MatchDeckCard | null>(null);
   const [draftDeckImage, setDraftDeckImage] = useState<string | undefined>();
@@ -355,6 +359,12 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
             </span>
           </div>
 
+          {deleteAccountError && (
+            <div role="alert" className="rounded-xl border border-red-700/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+              {deleteAccountError}
+            </div>
+          )}
+
           <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/50">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-900 text-slate-400 font-mono uppercase text-[11px] border-b border-slate-800">
@@ -490,6 +500,35 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                         >
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
+
+                        {u.authId && u.role !== 'criador' && u.id !== currentCreatorUser.id && (
+                          <button
+                            type="button"
+                            disabled={deletingAccountId === u.authId}
+                            onClick={async () => {
+                              const login = displayLogin(u.handle);
+                              const confirmed = window.confirm(
+                                `Excluir permanentemente a conta de ${u.name} (${login})? O perfil e o acesso ao site serão removidos. Os registros históricos de temporadas serão mantidos.`,
+                              );
+                              if (!confirmed) return;
+                              setDeleteAccountError(null);
+                              setDeletingAccountId(u.authId!);
+                              try {
+                                await onDeleteAccount(u);
+                              } catch (error) {
+                                setDeleteAccountError(error instanceof Error ? error.message : `Não foi possível excluir a conta de ${u.name}.`);
+                              } finally {
+                                setDeletingAccountId(null);
+                              }
+                            }}
+                            aria-label={`Excluir conta de ${u.name}`}
+                            title={`Excluir conta de ${u.name}`}
+                            className="inline-flex min-h-7 items-center justify-center gap-1 rounded bg-red-950/60 px-2 py-1 text-[10px] font-bold text-red-200 transition hover:bg-red-900 disabled:cursor-wait disabled:opacity-60"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            {deletingAccountId === u.authId ? 'Excluindo…' : 'Excluir conta'}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
