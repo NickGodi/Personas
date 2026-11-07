@@ -35,6 +35,10 @@ const LEGACY_IDS: Record<string, string> = {
   '@nickpresidiario': 'user_nick',
 };
 const PRESENCE_TTL_MS = 45_000;
+function normalizePresenceHandle(value: unknown) {
+  const handle = String(value || '').trim().toLowerCase();
+  return handle.startsWith('@') ? handle : `@${handle}`;
+}
 const validModes = ['random', 'predefined', 'balanced', 'captain-draft'];
 const validFormats = ['MD1', 'MD3', 'MD5'];
 const validStages = ['setup', 'in_progress', 'complete'];
@@ -355,33 +359,89 @@ async function handlePresence(req: ExpressRequest, res: ExpressResponse) {
   const admin = await getAdminClient();
   if (!admin) return responseError(res, 503, 'Presença compartilhada não configurada.');
   if (req.method === 'GET') {
-    const cutoff = new Date(Date.now() - PRESENCE_TTL_MS).toISOString();
-    const { data, error } = await admin.from('presence_sessions').select('profile_handle')
-      .gt('last_seen_at', cutoff);
+    const now = Date.now();
+    const { data, error } = await admin.from('presence_sessions')
+      .select('user_id,profile_handle,last_seen_at,ended_at');
     if (error) return responseError(res, 503, 'Não foi possível consultar presenças.');
-    const userIds = [...new Set((data || []).map((row: { profile_handle: string }) => LEGACY_IDS[row.profile_handle] || row.profile_handle))];
-    return res.status(200).json({ userIds });
+    const { data: profiles, error: profilesError } = await admin.from('profiles').select('id,handle');
+    if (profilesError) return responseError(res, 503, 'Não foi possível relacionar presenças aos perfis.');
+    const profileIdsByHandle = new Map((profiles || []).map((profile: { id: string; handle: string }) => {
+      const handle = normalizePresenceHandle(profile.handle);
+      return [handle, LEGACY_IDS[handle] || profile.id] as const;
+    }));
+    const statuses: Record<string, { online: boolean; lastSeenAt: string | null; offlineSince: string | null }> = {};
+    for (const row of data || []) {
+      const handle = normalizePresenceHandle(row.profile_handle);
+      const userId = LEGACY_IDS[handle] || profileIdsByHandle.get(handle) || row.user_id;
+      const status = statuses[userId] || { online: false, lastSeenAt: null, offlineSince: null };
+      const lastSeenAt = new Date(row.last_seen_at).getTime();
+      const endedAt = row.ended_at ? new Date(row.ended_at).getTime() : null;
+      const isSessionOnline = endedAt === null && Number.isFinite(lastSeenAt) && now - lastSeenAt <= PRESENCE_TTL_MS;
+      status.online ||= isSessionOnline;
+      if (Number.isFinite(lastSeenAt) && (!status.lastSeenAt || lastSeenAt > Date.parse(status.lastSeenAt))) {
+        status.lastSeenAt = new Date(lastSeenAt).toISOString();
+      }
+      const sessionEndedAt = endedAt ?? lastSeenAt + PRESENCE_TTL_MS;
+      if (!isSessionOnline && Number.isFinite(sessionEndedAt)
+        && (!status.offlineSince || sessionEndedAt > Date.parse(status.offlineSince))) {
+        status.offlineSince = new Date(Math.min(sessionEndedAt, now)).toISOString();
+      }
+      statuses[userId] = status;
+    }
+    Object.values(statuses).forEach((status) => {
+      if (status.online) status.offlineSince = null;
+    });
+    const userIds = Object.entries(statuses).filter(([, status]) => status.online).map(([userId]) => userId);
+    return res.status(200).json({ userIds, statuses });
   }
   const actor = await getActor(req);
   if (!actor) return responseError(res, 401, 'Entre na sua conta para atualizar a presença.');
   if (req.method === 'PUT') {
-    const { sessionId } = req.body || {};
+    const { sessionId, userId } = req.body || {};
     if (typeof sessionId !== 'string' || !sessionId.trim() || sessionId.length > 160) {
       return responseError(res, 400, 'Sessão de presença inválida.');
     }
+    let targetProfile = actor.profile;
+    if (typeof userId === 'string' && userId !== actor.appId) {
+      if (actor.profile.role !== 'criador') return responseError(res, 403, 'Somente o criador pode acompanhar outro perfil.');
+      const { data: profiles, error: profilesError } = await admin.from('profiles').select('id,handle,role');
+      if (profilesError) return responseError(res, 503, 'Não foi possível localizar o perfil acompanhado.');
+      const matchingProfile = (profiles || []).find((profile: { id: string; handle: string }) => {
+        const handle = normalizePresenceHandle(profile.handle);
+        return profile.id === userId || LEGACY_IDS[handle] === userId;
+      });
+      if (!matchingProfile) return responseError(res, 404, 'Este perfil ainda não possui uma conta registrada.');
+      const normalizedHandle = normalizePresenceHandle(matchingProfile.handle);
+      targetProfile = { ...matchingProfile, handle: normalizedHandle };
+    }
     const { error } = await admin.from('presence_sessions').upsert({
       session_id: sessionId, user_id: actor.authUser.id,
-      profile_handle: actor.profile.handle, last_seen_at: new Date().toISOString(),
+      profile_handle: targetProfile.handle, last_seen_at: new Date().toISOString(), ended_at: null,
     }, { onConflict: 'session_id' });
     if (error) return responseError(res, 503, 'Não foi possível atualizar sua presença.');
-    const cutoff = new Date(Date.now() - PRESENCE_TTL_MS).toISOString();
-    const { data } = await admin.from('presence_sessions').select('profile_handle').gt('last_seen_at', cutoff);
-    return res.status(200).json({ userIds: [...new Set((data || []).map((row: { profile_handle: string }) => LEGACY_IDS[row.profile_handle] || row.profile_handle))] });
+    const { data: activeSessions, error: sessionsError } = await admin.from('presence_sessions')
+      .select('user_id,profile_handle,last_seen_at,ended_at');
+    if (sessionsError) return responseError(res, 503, 'Não foi possível atualizar a lista de presenças.');
+    const { data: profiles, error: profilesError } = await admin.from('profiles').select('id,handle');
+    if (profilesError) return responseError(res, 503, 'Não foi possível relacionar presenças aos perfis.');
+    const profileIdsByHandle = new Map((profiles || []).map((profile: { id: string; handle: string }) => {
+      const handle = normalizePresenceHandle(profile.handle);
+      return [handle, LEGACY_IDS[handle] || profile.id] as const;
+    }));
+    const cutoff = Date.now() - PRESENCE_TTL_MS;
+    const userIds = [...new Set((activeSessions || [])
+      .filter((row: { last_seen_at: string; ended_at: string | null }) => !row.ended_at && Date.parse(row.last_seen_at) >= cutoff)
+      .map((row: { profile_handle: string; user_id: string }) => {
+        const handle = normalizePresenceHandle(row.profile_handle);
+        return LEGACY_IDS[handle] || profileIdsByHandle.get(handle) || row.user_id;
+      }))];
+    return res.status(200).json({ userIds });
   }
   if (req.method === 'DELETE') {
     const sessionId = typeof req.query?.sessionId === 'string' ? req.query.sessionId : req.body?.sessionId;
     if (typeof sessionId === 'string') {
-      await admin.from('presence_sessions').delete().eq('session_id', sessionId).eq('user_id', actor.authUser.id);
+      await admin.from('presence_sessions').update({ ended_at: new Date().toISOString() })
+        .eq('session_id', sessionId).eq('user_id', actor.authUser.id).is('ended_at', null);
     }
     return res.status(200).json({ ok: true });
   }

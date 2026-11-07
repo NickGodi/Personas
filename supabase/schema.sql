@@ -57,9 +57,11 @@ create table if not exists public.presence_sessions (
   session_id text primary key,
   user_id uuid not null references auth.users(id) on delete cascade,
   profile_handle text not null,
-  last_seen_at timestamptz not null default now()
+  last_seen_at timestamptz not null default now(),
+  ended_at timestamptz
 );
 create index if not exists presence_sessions_last_seen_idx on public.presence_sessions (last_seen_at);
+create index if not exists presence_sessions_user_id_idx on public.presence_sessions (user_id);
 alter table public.shared_app_state enable row level security;
 alter table public.presence_sessions enable row level security;
 revoke all on public.shared_app_state, public.presence_sessions from public, anon, authenticated;

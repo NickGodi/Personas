@@ -18,19 +18,30 @@ let sharedTournamentState: Record<string, any> | null = null;
 let sharedTournamentStateLoaded = false;
 let tournamentWriteQueue = Promise.resolve();
 const PRESENCE_TTL_MS = 45_000;
-const presenceSessions = new Map<string, { userId: string; lastSeenAt: number }>();
+const presenceSessions = new Map<string, { userId: string; lastSeenAt: number; endedAt: number | null }>();
 
-function getOnlineUserIds() {
+function getPresenceSnapshot() {
   const now = Date.now();
-  const onlineUserIds = new Set<string>();
-  for (const [sessionId, presence] of presenceSessions) {
-    if (now - presence.lastSeenAt > PRESENCE_TTL_MS) {
-      presenceSessions.delete(sessionId);
-      continue;
+  const statuses: Record<string, { online: boolean; lastSeenAt: string | null; offlineSince: string | null }> = {};
+  for (const presence of presenceSessions.values()) {
+    const status = statuses[presence.userId] || { online: false, lastSeenAt: null, offlineSince: null };
+    const online = presence.endedAt === null && now - presence.lastSeenAt <= PRESENCE_TTL_MS;
+    status.online ||= online;
+    const lastSeenAt = new Date(presence.lastSeenAt).toISOString();
+    if (!status.lastSeenAt || Date.parse(lastSeenAt) > Date.parse(status.lastSeenAt)) status.lastSeenAt = lastSeenAt;
+    const endedAt = presence.endedAt ?? presence.lastSeenAt + PRESENCE_TTL_MS;
+    if (!online && (!status.offlineSince || endedAt > Date.parse(status.offlineSince))) {
+      status.offlineSince = new Date(Math.min(endedAt, now)).toISOString();
     }
-    onlineUserIds.add(presence.userId);
+    statuses[presence.userId] = status;
   }
-  return [...onlineUserIds];
+  Object.values(statuses).forEach((status) => {
+    if (status.online) status.offlineSince = null;
+  });
+  return {
+    userIds: Object.entries(statuses).filter(([, status]) => status.online).map(([userId]) => userId),
+    statuses,
+  };
 }
 
 function stableTournamentValue(value: any): any {
@@ -155,7 +166,7 @@ async function startServer() {
 
   // Presence is session based; old heartbeats expire if a tab closes unexpectedly.
   app.get('/api/presence', (_req, res) => {
-    res.json({ userIds: getOnlineUserIds() });
+    res.json(getPresenceSnapshot());
   });
 
   app.put('/api/presence', (req, res) => {
@@ -164,16 +175,19 @@ async function startServer() {
       || typeof userId !== 'string' || !userId.trim() || userId.length > 160) {
       return res.status(400).json({ error: 'Sessão de presença inválida.' });
     }
-    presenceSessions.set(sessionId, { userId, lastSeenAt: Date.now() });
-    return res.json({ userIds: getOnlineUserIds() });
+    presenceSessions.set(sessionId, { userId, lastSeenAt: Date.now(), endedAt: null });
+    return res.json(getPresenceSnapshot());
   });
 
   app.delete('/api/presence', (req, res) => {
     const sessionId = typeof req.query.sessionId === 'string'
       ? req.query.sessionId
       : req.body?.sessionId;
-    if (typeof sessionId === 'string') presenceSessions.delete(sessionId);
-    return res.json({ userIds: getOnlineUserIds() });
+    if (typeof sessionId === 'string') {
+      const existing = presenceSessions.get(sessionId);
+      if (existing) presenceSessions.set(sessionId, { ...existing, endedAt: Date.now() });
+    }
+    return res.json(getPresenceSnapshot());
   });
 
   // One shared tournament/draft state for all accounts connected to this server.

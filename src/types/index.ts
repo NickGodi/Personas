@@ -85,6 +85,8 @@ export interface User {
   email?: string; // identificador de login privado e único quando informado
   role: UserRole;
   isOnline: boolean;
+  lastSeenAt?: string | null;
+  offlineSince?: string | null;
   avatar: string;
   bio: string;
   favoriteChampion: string;

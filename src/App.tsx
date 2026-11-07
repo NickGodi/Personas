@@ -638,9 +638,48 @@ export default function App() {
     readStorage('personas_match_records_v1', [])
   );
   const cardsWithAverage = useMemo(() => {
-    const usersWithVotes = new Set(recentVotes.map((vote) => vote.targetUserId));
-    return reconcileSeasonCriminalCards(cards, seasonArchives).filter((card) => usersWithVotes.has(card.userId));
-  }, [cards, recentVotes, seasonArchives]);
+    const votedPlayers = new Map<string, { userId: string; season: number; sum: number; count: number }>();
+    recentVotes.forEach((vote) => {
+      const key = `${vote.season}:${vote.targetUserId}`;
+      const aggregate = votedPlayers.get(key) || {
+        userId: vote.targetUserId,
+        season: vote.season,
+        sum: 0,
+        count: 0,
+      };
+      aggregate.sum += vote.score;
+      aggregate.count += 1;
+      votedPlayers.set(key, aggregate);
+    });
+
+    const currentUserById = new Map(users.map((user) => [user.id, user]));
+    const existingCardsBySeasonPlayer = new Map<string, CardItem>();
+    cards.forEach((card) => {
+      const key = `${card.season}:${card.userId}`;
+      if (!existingCardsBySeasonPlayer.has(key)) existingCardsBySeasonPlayer.set(key, card);
+    });
+
+    const votedCards = [...votedPlayers.values()].flatMap(({ userId, season, sum, count }) => {
+      const user = currentUserById.get(userId);
+      if (!user || count === 0) return [];
+      const score = Math.round(sum / count);
+      const existing = existingCardsBySeasonPlayer.get(`${season}:${userId}`);
+      const base = existing || createPlayerCard(user, season, score);
+      return [{
+        ...base,
+        id: existing?.id || `card_${userId}_s${season}`,
+        userName: user.name,
+        userHandle: user.handle,
+        userAvatar: user.avatar,
+        score,
+        tier: getSeasonCardTier(score, false, season),
+        lane: user.primaryLane,
+        favoriteChampion: user.favoriteChampion,
+      }];
+    });
+
+    return reconcileSeasonCriminalCards(votedCards, seasonArchives);
+  }, [cards, recentVotes, seasonArchives, users]);
 
   // Navigation & Session
   const [activeTab, setActiveTab] = useState<string>('cards');
@@ -737,7 +776,8 @@ export default function App() {
     });
   }, [visibleNotifications]);
   // Role preview and account impersonation change the displayed user, not the signed-in session.
-  const presenceActorId = isCreatorSession ? creatorUser.id : currentUser?.id || null;
+  // The displayed profile is the one that should be online while the creator assumes it.
+  const presenceActorId = currentUser?.id || null;
   const presenceSessionId = useMemo(() => {
     try {
       const key = 'personas_presence_session_v1';
@@ -753,14 +793,22 @@ export default function App() {
     }
   }, []);
   const [onlineUserIds, setOnlineUserIds] = useState<string[]>([]);
+  const [presenceStatusByUserId, setPresenceStatusByUserId] = useState<Record<string, {
+    online: boolean;
+    lastSeenAt: string | null;
+    offlineSince: string | null;
+  }>>({});
   const creatorPanelUsers = useMemo(() => users.map((user) => ({
     ...user,
     isOnline: onlineUserIds.includes(user.id),
-  })), [users, onlineUserIds]);
+    lastSeenAt: presenceStatusByUserId[user.id]?.lastSeenAt || null,
+    offlineSince: presenceStatusByUserId[user.id]?.offlineSince || null,
+  })), [users, onlineUserIds, presenceStatusByUserId]);
 
   useEffect(() => {
     if (!presenceActorId) {
       setOnlineUserIds([]);
+      setPresenceStatusByUserId({});
       return;
     }
 
@@ -779,15 +827,32 @@ export default function App() {
         });
         const response = await fetch('/api/presence');
         if (!response.ok) throw new Error('Falha ao buscar presença.');
-        const result = await response.json() as { userIds?: unknown };
+        const result = await response.json() as {
+          userIds?: unknown;
+          statuses?: Record<string, { online?: unknown; lastSeenAt?: unknown; offlineSince?: unknown }>;
+        };
         if (!isCancelled) {
+          const statuses = result.statuses && typeof result.statuses === 'object'
+            ? Object.fromEntries(Object.entries(result.statuses).map(([id, status]) => [id, {
+              online: status.online === true,
+              lastSeenAt: typeof status.lastSeenAt === 'string' ? status.lastSeenAt : null,
+              offlineSince: typeof status.offlineSince === 'string' ? status.offlineSince : null,
+            }]))
+            : {};
+          setPresenceStatusByUserId(statuses);
           setOnlineUserIds(Array.isArray(result.userIds)
             ? result.userIds.filter((id): id is string => typeof id === 'string')
-            : [presenceActorId]);
+            : Object.entries(statuses).filter(([, status]) => status.online).map(([id]) => id));
         }
       } catch {
         // Keep the current browser session accurate if the API is temporarily unavailable.
-        if (!isCancelled) setOnlineUserIds([presenceActorId]);
+        if (!isCancelled) {
+          setOnlineUserIds([presenceActorId]);
+          setPresenceStatusByUserId((previous) => ({
+            ...previous,
+            [presenceActorId]: { online: true, lastSeenAt: new Date().toISOString(), offlineSince: null },
+          }));
+        }
       }
     };
 

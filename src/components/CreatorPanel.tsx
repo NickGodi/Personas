@@ -37,6 +37,19 @@ const ROUTE_CATEGORIES: { lane: Lane; label: string; color: string }[] = [
   { lane: 'PREENCHER', label: 'Preencher', color: '#94a3b8' },
 ];
 
+const formatOfflineDuration = (offlineSince?: string | null) => {
+  if (!offlineSince) return 'Offline';
+  const offlineTimestamp = Date.parse(offlineSince);
+  if (!Number.isFinite(offlineTimestamp)) return 'Offline';
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - offlineTimestamp) / 60_000));
+  if (elapsedMinutes < 1) return 'Offline há menos de 1 min';
+  if (elapsedMinutes < 60) return `Offline há ${elapsedMinutes} min`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `Offline há ${elapsedHours} h`;
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `Offline há ${elapsedDays} d`;
+};
+
 interface CreatorPanelProps {
   users: User[];
   votes: VoteRecord[];
@@ -393,7 +406,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[11px] text-slate-500">
-                          <span className="w-2 h-2 rounded-full bg-slate-600" /> Offline
+                          <span className="w-2 h-2 rounded-full bg-slate-600" /> {formatOfflineDuration(u.offlineSince)}
                         </span>
                       )}
                     </td>
