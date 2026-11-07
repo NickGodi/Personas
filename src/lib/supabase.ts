@@ -371,6 +371,17 @@ export async function saveAuthenticatedProfile(user: User): Promise<void> {
   if (savedProfile.avatar !== user.avatar) throw new Error('A foto do perfil não foi sincronizada.');
 }
 
+export async function updateAuthenticatedPassword(currentPassword: string, newPassword: string): Promise<void> {
+  if (!supabase) throw new Error('A autenticação compartilhada não está configurada.');
+  const { data, error: authError } = await supabase.auth.getUser();
+  if (authError || !data.user) throw authError || new Error('Entre na sua conta para alterar a senha.');
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword,
+    current_password: currentPassword,
+  });
+  if (error) throw error;
+}
+
 export function mergeRegisteredProfiles(users: User[], profiles: User[]): User[] {
   const byId = new Map(users.map((user) => [user.id, user]));
   profiles.forEach((profile) => {

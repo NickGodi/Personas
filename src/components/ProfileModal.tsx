@@ -12,12 +12,15 @@ import {
   MessageSquare,
   RotateCcw,
   Save,
+  Settings,
   ShieldAlert,
   Sparkles,
   Star,
   Trash2,
   Trophy,
   Upload,
+  Eye,
+  EyeOff,
   X,
 } from 'lucide-react';
 
@@ -45,13 +48,14 @@ interface ProfileModalProps {
   onResetRating: (userId: string) => void;
   canDeleteComments: boolean;
   onUpdateProfile: (updated: Partial<User>) => string | null | Promise<string | null>;
+  onChangePassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
   onCastVote: (vote: { targetUserId: string; score: number; comment?: string }) => Promise<string | null>;
   onAddComment: (targetUserId: string, text: string) => void;
   onDeleteComment: (targetUserId: string, commentId: string) => void;
   onOpenReportModal?: (targetUser: User) => void;
 }
 
-type ProfileTab = 'profile' | 'stats' | 'history' | 'votes';
+type ProfileTab = 'profile' | 'settings' | 'stats' | 'history' | 'votes';
 
 const tierLabels: Record<EloTier, string> = {
   lenda: 'Lenda',
@@ -94,13 +98,22 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onResetRating,
   canDeleteComments,
   onUpdateProfile,
+  onChangePassword,
   onCastVote,
   onAddComment,
   onDeleteComment,
   onOpenReportModal,
 }) => {
   const [name, setName] = useState(user.name);
-  const [handle, setHandle] = useState(displayLogin(user.handle));
+  const [settingsLogin, setSettingsLogin] = useState(displayLogin(user.handle));
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [showSettingsPasswords, setShowSettingsPasswords] = useState(false);
+  const [loginSettingsFeedback, setLoginSettingsFeedback] = useState<string | null>(null);
+  const [passwordSettingsFeedback, setPasswordSettingsFeedback] = useState<string | null>(null);
+  const [loginSettingsSaving, setLoginSettingsSaving] = useState(false);
+  const [passwordSettingsSaving, setPasswordSettingsSaving] = useState(false);
   const [avatar, setAvatar] = useState(user.avatar.startsWith('data:') ? '' : user.avatar);
   const [bio, setBio] = useState(user.bio);
   const [favoriteChampion, setFavoriteChampion] = useState(user.favoriteChampion);
@@ -170,15 +183,10 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   if (!isOpen) return null;
 
   const handleSave = async () => {
-    const normalizedHandle = normalizeHandle(handle);
-    if (normalizedHandle.length < 3) {
-      setProfileSaveError('Informe um login válido para seu perfil.');
-      return;
-    }
     setProfileSaveError(null);
     setProfileSaving(true);
     try {
-      const saveError = await onUpdateProfile({ name, handle: normalizedHandle, avatar: avatar.trim() || user.avatar, bio, favoriteChampion, primaryLane, riotId });
+      const saveError = await onUpdateProfile({ name, avatar: avatar.trim() || user.avatar, bio, favoriteChampion, primaryLane, riotId });
       if (saveError) {
         setProfileSaveError(saveError);
         return;
@@ -188,6 +196,61 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       setProfileSaveError(error instanceof Error ? error.message : 'Não foi possível salvar o perfil.');
     } finally {
       setProfileSaving(false);
+    }
+  };
+
+  const handleSaveLogin = async () => {
+    const normalizedHandle = normalizeHandle(settingsLogin);
+    if (!/^[a-z0-9._-]{2,24}$/.test(normalizedHandle.slice(1))) {
+      setLoginSettingsFeedback('O login deve ter de 2 a 24 caracteres: letras, números, ponto, hífen ou sublinhado.');
+      return;
+    }
+    setLoginSettingsSaving(true);
+    setLoginSettingsFeedback(null);
+    try {
+      const saveError = await onUpdateProfile({ handle: normalizedHandle });
+      if (saveError) {
+        setLoginSettingsFeedback(saveError);
+        return;
+      }
+      setSettingsLogin(displayLogin(normalizedHandle));
+      setLoginSettingsFeedback('Login atualizado. Use o novo login no próximo acesso.');
+    } catch (error) {
+      setLoginSettingsFeedback(error instanceof Error ? error.message : 'Não foi possível atualizar o login.');
+    } finally {
+      setLoginSettingsSaving(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPassword) {
+      setPasswordSettingsFeedback('Informe sua senha atual para confirmar a alteração.');
+      return;
+    }
+    if (newPassword.length < 8 || newPassword.length > 128) {
+      setPasswordSettingsFeedback('A nova senha precisa ter entre 8 e 128 caracteres.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordSettingsFeedback('A confirmação da nova senha não corresponde.');
+      return;
+    }
+    setPasswordSettingsSaving(true);
+    setPasswordSettingsFeedback(null);
+    try {
+      const changeError = await onChangePassword(currentPassword, newPassword);
+      if (changeError) {
+        setPasswordSettingsFeedback(changeError);
+        return;
+      }
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      setPasswordSettingsFeedback('Senha atualizada com sucesso.');
+    } catch (error) {
+      setPasswordSettingsFeedback(error instanceof Error ? error.message : 'Não foi possível atualizar a senha.');
+    } finally {
+      setPasswordSettingsSaving(false);
     }
   };
 
@@ -353,6 +416,18 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               {tab.label}
             </button>
           ))}
+          {isOwnProfile && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('settings')}
+              aria-label="Configurações da conta"
+              title="Configurações da conta"
+              aria-current={activeTab === 'settings' ? 'page' : undefined}
+              className={`ml-auto shrink-0 border-b-2 px-3 py-2 transition-colors ${activeTab === 'settings' ? 'border-red-500 text-red-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+            >
+              <Settings className="h-4 w-4" />
+            </button>
+          )}
         </nav>
 
         <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
@@ -364,9 +439,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <label className="text-slate-300">Nome no site
                   <input value={name} onChange={(event) => setName(event.target.value)} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 p-2.5 text-white" />
-                </label>
-                <label className="text-slate-300">Login
-                  <input value={handle} onChange={(event) => { setHandle(event.target.value); setProfileSaveError(null); }} placeholder="nick" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 p-2.5 font-mono text-white" />
                 </label>
                 <div className="md:col-span-2">
                   <span className="text-slate-300">Foto do perfil</span>
@@ -416,6 +488,57 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   <Save className="h-4 w-4" /> {profileSaving ? 'Salvando perfil…' : 'Salvar perfil'}
                 </button>
               </div>
+            </div>
+          )}
+
+          {activeTab === 'settings' && isOwnProfile && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="font-display text-base font-bold text-white">Configurações da conta</h3>
+                <p className="mt-1 text-xs text-slate-400">Atualize seu login ou defina uma nova senha.</p>
+              </div>
+
+              <section className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+                <div>
+                  <h4 className="text-sm font-bold text-white">Login</h4>
+                  <p className="mt-1 text-xs text-slate-400">Este login será usado para entrar no Personas e aparecerá no seu perfil.</p>
+                </div>
+                <label className="block text-xs font-semibold text-slate-300">Seu login
+                  <input value={settingsLogin} onChange={(event) => { setSettingsLogin(event.target.value); setLoginSettingsFeedback(null); }} autoComplete="username" maxLength={24} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 font-mono text-white sm:max-w-md" />
+                </label>
+                {loginSettingsFeedback && <p role="status" className={`text-xs ${loginSettingsFeedback.startsWith('Login atualizado') ? 'text-emerald-300' : 'text-rose-300'}`}>{loginSettingsFeedback}</p>}
+                <button type="button" onClick={() => void handleSaveLogin()} disabled={loginSettingsSaving || displayLogin(user.handle) === settingsLogin.trim()} className="inline-flex items-center gap-2 rounded-xl border border-amber-600/50 bg-amber-950/40 px-4 py-2.5 text-xs font-bold text-amber-200 transition hover:bg-amber-900/60 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Save className="h-4 w-4" /> {loginSettingsSaving ? 'Salvando login…' : 'Salvar login'}
+                </button>
+              </section>
+
+              <section className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/50 p-4">
+                <div>
+                  <h4 className="text-sm font-bold text-white">Senha</h4>
+                  <p className="mt-1 text-xs text-slate-400">Por segurança, a senha atual não pode ser exibida. Confirme-a para definir uma nova.</p>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="text-xs font-semibold text-slate-300">Senha atual
+                    <input type={showSettingsPasswords ? 'text' : 'password'} value={currentPassword} onChange={(event) => { setCurrentPassword(event.target.value); setPasswordSettingsFeedback(null); }} autoComplete="current-password" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-white" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-300">Nova senha
+                    <input type={showSettingsPasswords ? 'text' : 'password'} value={newPassword} onChange={(event) => { setNewPassword(event.target.value); setPasswordSettingsFeedback(null); }} autoComplete="new-password" minLength={8} maxLength={128} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-white" />
+                  </label>
+                  <label className="text-xs font-semibold text-slate-300 md:col-span-2">Confirmar nova senha
+                    <input type={showSettingsPasswords ? 'text' : 'password'} value={confirmNewPassword} onChange={(event) => { setConfirmNewPassword(event.target.value); setPasswordSettingsFeedback(null); }} autoComplete="new-password" minLength={8} maxLength={128} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-white md:max-w-md" />
+                  </label>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <button type="button" onClick={() => setShowSettingsPasswords((visible) => !visible)} className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold text-slate-400 hover:bg-slate-800 hover:text-white">
+                    {showSettingsPasswords ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    {showSettingsPasswords ? 'Ocultar senhas' : 'Mostrar senhas digitadas'}
+                  </button>
+                  <button type="button" onClick={() => void handleChangePassword()} disabled={passwordSettingsSaving || !currentPassword || !newPassword || !confirmNewPassword} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-4 py-2.5 text-xs font-bold text-white shadow-lg transition hover:from-red-500 hover:to-rose-500 disabled:cursor-not-allowed disabled:opacity-50">
+                    <Save className="h-4 w-4" /> {passwordSettingsSaving ? 'Atualizando senha…' : 'Atualizar senha'}
+                  </button>
+                </div>
+                {passwordSettingsFeedback && <p role="status" className={`text-xs ${passwordSettingsFeedback.startsWith('Senha atualizada') ? 'text-emerald-300' : 'text-rose-300'}`}>{passwordSettingsFeedback}</p>}
+              </section>
             </div>
           )}
 

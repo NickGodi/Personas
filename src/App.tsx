@@ -48,7 +48,7 @@ import { readStorage, writeStorage } from './utils/storage';
 import { CARD_ORNAMENT_SETTINGS_VERSION, CARD_ORNAMENT_SETTINGS_VERSION_KEY, CARD_ORNAMENT_STORAGE_KEY, DEFAULT_CARD_ORNAMENT_SETTINGS, loadCardOrnamentSettings, loadTierCardOrnamentSettings, migrateCardOrnamentSettings, normalizeCardOrnamentSettings, normalizeTierCardOrnamentSettings, ORNAMENT_TIER_ORDER, TIER_CARD_ORNAMENT_STORAGE_KEY } from './utils/cardOrnament';
 import { formatGold, formatKda, normalizeStats } from './utils/stats';
 import { displayLogin, normalizeHandle, normalizeRiotId, validateUniqueUserIdentity } from './utils/userIdentity';
-import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, loadSharedNotifications, loadSharedPlayerMatchRecords, loadSharedSeasonControl, loadSharedSeasonVotes, mergeRegisteredProfiles, saveAuthenticatedProfile, saveSharedCardOrnamentSettings, saveSharedNotification, saveSharedPlayerMatchRecord, saveSharedPlayerMatchStats, saveSharedSeasonControl, saveSharedSeasonVote, setSharedNotificationRead, deleteSharedNotification, deleteAllSharedNotifications, deleteSharedSeasonVotes, deleteRegisteredAccount } from './lib/supabase';
+import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, loadSharedNotifications, loadSharedPlayerMatchRecords, loadSharedSeasonControl, loadSharedSeasonVotes, mergeRegisteredProfiles, saveAuthenticatedProfile, updateAuthenticatedPassword, saveSharedCardOrnamentSettings, saveSharedNotification, saveSharedPlayerMatchRecord, saveSharedPlayerMatchStats, saveSharedSeasonControl, saveSharedSeasonVote, setSharedNotificationRead, deleteSharedNotification, deleteAllSharedNotifications, deleteSharedSeasonVotes, deleteRegisteredAccount } from './lib/supabase';
 import { 
   Sparkles, 
   Trophy, 
@@ -2945,6 +2945,19 @@ export default function App() {
           onImpersonateUser={handleImpersonateUser}
           onResetRating={(userId) => handleResetSeasonRatings(userId)}
           onUpdateProfile={handleSaveProfile}
+          onChangePassword={async (currentPassword, newPassword) => {
+            try {
+              await updateAuthenticatedPassword(currentPassword, newPassword);
+              return null;
+            } catch (error) {
+              console.error('Não foi possível atualizar a senha da conta.', error);
+              return error instanceof Error && /invalid|current password|senha atual/i.test(error.message)
+                ? 'A senha atual está incorreta.'
+                : error instanceof Error && error.message
+                  ? error.message
+                  : 'Não foi possível atualizar a senha. Confira a conexão e tente novamente.';
+            }
+          }}
           onOpenReportModal={(target) => {
             setProfileModalTarget(null);
             setReportModalTarget(target);
