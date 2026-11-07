@@ -2026,17 +2026,49 @@ export default function App() {
     if (!canAccessCreatorPanel || currentUser?.role !== 'criador' || isImpersonating) {
       throw new Error('Somente o criador pode excluir contas.');
     }
-    if (!target.authId || target.role === 'criador' || target.id === creatorUser.id) {
+    if (target.role === 'criador'
+      || target.id === creatorUser.id
+      || target.id === currentUser.id
+      || Boolean(target.authId && (target.authId === creatorUser.authId || target.authId === currentUser.authId))) {
       throw new Error('Esta conta não pode ser excluída por esta opção.');
     }
 
-    await deleteRegisteredAccount(target.authId);
+    if (target.authId) await deleteRegisteredAccount(target.authId);
 
-    setUsers((previous) => previous.filter((user) => user.authId !== target.authId));
-    setNotifications((previous) => previous.filter((item) => item.userId !== target.id && item.userId !== target.authId));
-    setProfileModalTarget((previous) => previous && (previous.id === target.id || previous.authId === target.authId) ? null : previous);
+    const deletedIds = new Set([target.id, target.authId].filter((id): id is string => Boolean(id)));
+    const isDeletedUser = (id: string | undefined) => Boolean(id && deletedIds.has(id));
+
+    setUsers((previous) => previous.filter((user) => !isDeletedUser(user.id) && !isDeletedUser(user.authId)));
+    setRecentVotes((previous) => previous.filter((vote) =>
+      !isDeletedUser(vote.targetUserId)
+      && !isDeletedUser(vote.fromUserId)
+      && !isDeletedUser(vote.fromAuthUserId)
+    ));
+    pendingSharedVotesRef.current.forEach((vote, id) => {
+      if (isDeletedUser(vote.targetUserId) || isDeletedUser(vote.fromUserId) || isDeletedUser(vote.fromAuthUserId)) {
+        pendingSharedVotesRef.current.delete(id);
+      }
+    });
+    setCards((previous) => previous.filter((card) => !isDeletedUser(card.userId)));
+    setNotifications((previous) => previous.filter((item) => !isDeletedUser(item.userId)));
+    setReports((previous) => previous.filter((report) =>
+      !isDeletedUser(report.reporterId) && !isDeletedUser(report.targetUserId)
+    ));
+    setSeasonCommentArchive((previous) => Object.fromEntries(
+      Object.entries(previous).map(([season, commentsByUser]) => [
+        season,
+        Object.fromEntries(Object.entries(commentsByUser)
+          .filter(([userId]) => !isDeletedUser(userId))
+          .map(([userId, comments]) => [
+            userId,
+            comments.filter((comment) => !isDeletedUser(comment.authorId)),
+          ])),
+      ]),
+    ));
+    setProfileModalTarget((previous) => previous && (isDeletedUser(previous.id) || isDeletedUser(previous.authId)) ? null : previous);
+    setReportModalTarget((previous) => previous && (isDeletedUser(previous.id) || isDeletedUser(previous.authId)) ? null : previous);
     updateSharedTournament((previous) => {
-      const isDeletedAccount = (id: string) => id === target.id || id === target.authId;
+      const isDeletedAccount = (id: string) => isDeletedUser(id);
       return {
         attendeeIds: previous.attendeeIds.filter((id) => !isDeletedAccount(id)),
         captainIds: previous.captainIds.map((id) => isDeletedAccount(id) ? '' : id) as [string, string],

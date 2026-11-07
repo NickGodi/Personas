@@ -497,22 +497,27 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
 
-                        {u.authId && u.role !== 'criador' && u.id !== currentCreatorUser.id && (
+                        {u.role !== 'criador' && u.id !== currentCreatorUser.id && (
                           <button
                             type="button"
-                            disabled={deletingAccountId === u.authId}
+                            disabled={deletingAccountId === (u.authId || u.id)}
                             onClick={async () => {
                               const login = displayLogin(u.handle);
+                              const targetLabel = u.authId ? 'conta' : 'perfil do elenco';
+                              const deletionDetails = u.authId
+                                ? 'O perfil e o acesso serão removidos; votos e notificações vinculados também serão apagados.'
+                                : 'O perfil será removido do elenco; votos e notificações vinculados também serão apagados.';
                               const confirmed = window.confirm(
-                                `Excluir permanentemente a conta de ${u.name} (${login})? O perfil e o acesso serão removidos; votos enviados por esta conta e notificações vinculadas também serão apagados. As partidas importadas permanecem no histórico.`,
+                                `Excluir permanentemente o ${targetLabel} de ${u.name} (${login})? ${deletionDetails} As partidas importadas permanecem no histórico.`,
                               );
                               if (!confirmed) return;
                               setDeleteAccountError(null);
-                              setDeletingAccountId(u.authId!);
+                              const deletionKey = u.authId || u.id;
+                              setDeletingAccountId(deletionKey);
                               try {
                                 await onDeleteAccount(u);
                               } catch (error) {
-                                setDeleteAccountError(error instanceof Error ? error.message : `Não foi possível excluir a conta de ${u.name}.`);
+                                setDeleteAccountError(error instanceof Error ? error.message : `Não foi possível excluir o perfil de ${u.name}.`);
                               } finally {
                                 setDeletingAccountId(null);
                               }
@@ -522,7 +527,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                             className="inline-flex min-h-7 items-center justify-center gap-1 rounded bg-red-950/60 px-2 py-1 text-[10px] font-bold text-red-200 transition hover:bg-red-900 disabled:cursor-wait disabled:opacity-60"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
-                            {deletingAccountId === u.authId ? 'Excluindo…' : 'Excluir conta'}
+                            {deletingAccountId === (u.authId || u.id) ? 'Excluindo…' : 'Excluir conta'}
                           </button>
                         )}
                       </div>
