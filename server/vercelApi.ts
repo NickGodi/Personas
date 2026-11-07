@@ -505,6 +505,10 @@ async function handleDeleteAccount(req: ExpressRequest, res: ExpressResponse) {
 
     const { error: deleteError } = await admin.auth.admin.deleteUser(targetAuthId);
     if (deleteError) throw deleteError;
+    // Remove the public identity explicitly as well. This releases unique
+    // handle/Riot ID values even if the project's profile FK predates cascade.
+    const { error: profileDeleteError } = await admin.from('profiles').delete().eq('id', targetAuthId);
+    if (profileDeleteError) throw profileDeleteError;
     return res.status(200).json({ success: true });
   } catch (error) {
     console.error('Falha ao excluir conta pelo painel do criador:', error);

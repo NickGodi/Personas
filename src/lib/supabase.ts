@@ -383,7 +383,13 @@ export async function updateAuthenticatedPassword(currentPassword: string, newPa
 }
 
 export function mergeRegisteredProfiles(users: User[], profiles: User[]): User[] {
-  const byId = new Map(users.map((user) => [user.id, user]));
+  // Registered profiles are authoritative. Drop cached auth-backed profiles that
+  // no longer exist in Supabase, otherwise deleted accounts keep reserving their
+  // login and Riot ID on clients that have not restarted.
+  const activeAuthIds = new Set(profiles.map((profile) => profile.authId || profile.id));
+  const byId = new Map(users
+    .filter((user) => !user.authId || activeAuthIds.has(user.authId))
+    .map((user) => [user.id, user]));
   profiles.forEach((profile) => {
     const existing = byId.get(profile.id);
     byId.set(profile.id, existing ? { ...profile, stats: existing.stats, comments: existing.comments } : profile);

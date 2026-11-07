@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { User } from '../types';
 import { sound } from '../utils/audio';
-import { normalizeHandle, normalizeRiotId, validateUniqueUserIdentity } from '../utils/userIdentity';
+import { normalizeHandle, normalizeRiotId } from '../utils/userIdentity';
 import { supabase, loadAuthenticatedProfile, isSharedAccountsEnabled } from '../lib/supabase';
 import { LogIn, X, Crown, AlertCircle, UserPlus, LoaderCircle } from 'lucide-react';
 
@@ -16,7 +16,7 @@ type Mode = 'login' | 'register';
 
 const inputClass = 'w-full rounded-xl border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white placeholder:text-slate-500 focus:border-red-500 focus:outline-none';
 
-export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, onLoginSuccess }) => {
+export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLoginSuccess }) => {
   const [mode, setMode] = useState<Mode>('login');
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
@@ -84,18 +84,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, 
     }
     if (!normalizedRiotId || !normalizedRiotId.includes('#')) return setError('Informe seu Riot ID no formato Nome#TAG.');
     if (password.length < 8) return setError('A senha precisa ter pelo menos 8 caracteres.');
-
-    const candidate: User = {
-      id: '__novo_cadastro__', handle: normalizedHandle, name: name.trim(),
-      role: 'jogador', isOnline: false, avatar: '', bio: '', favoriteChampion: '', primaryLane,
-      riotId: normalizedRiotId, currentScore: 0, totalVotes: 0, seasonsPlayed: 0, mvpCount: 0,
-      aceCount: 0, stats: { kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 },
-      entryDate: new Date().toLocaleDateString('pt-BR'), createdAt: new Date().toISOString(), comments: [],
-    };
-    const creatorId = users.find((user) => user.role === 'criador')?.id || '';
-    const identityError = validateUniqueUserIdentity(users, candidate, creatorId);
-    // The database trigger restricts this reserved profile to the configured creator e-mail.
-    if (identityError) return setError(identityError);
 
     setLoading(true);
     try {

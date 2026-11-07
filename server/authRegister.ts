@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { signInWithLogin } from './authLogin';
 
 const ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
@@ -10,6 +10,30 @@ type RegisterResult = {
   status: number;
   body: { error: string } | { session: { access_token: string; refresh_token: string } };
 };
+
+async function isRegisteredProfileActive(
+  admin: SupabaseClient<any, 'public', 'public', any, any>,
+  profileId: string,
+): Promise<boolean> {
+  const { data, error } = await admin.auth.admin.getUserById(profileId);
+  if (!error && data.user) return true;
+
+  // Older delete flows removed the Auth account but left its public profile
+  // behind. Clean that orphan before enforcing the unique login/Riot ID checks.
+  const isMissingAuthUser = error && (
+    error.status === 404
+    || error.code === 'user_not_found'
+    || /user.*not found|not found.*user/i.test(error.message)
+  );
+  if (!isMissingAuthUser) {
+    if (error) throw error;
+    return false;
+  }
+
+  const { error: cleanupError } = await admin.from('profiles').delete().eq('id', profileId);
+  if (cleanupError) throw cleanupError;
+  return false;
+}
 
 function allowAttempt(ip: string) {
   const now = Date.now();
@@ -61,12 +85,16 @@ export async function registerWithLogin(input: Record<string, unknown>, ip = 'un
     const { data: existingHandle, error: handleError } = await admin.from('profiles')
       .select('id').eq('handle', internalHandle).maybeSingle();
     if (handleError) throw handleError;
-    if (existingHandle) return { status: 409, body: { error: 'Esse login já está em uso. Escolha outro login.' } };
+    if (existingHandle && await isRegisteredProfileActive(admin, existingHandle.id)) {
+      return { status: 409, body: { error: 'Esse login já está em uso. Escolha outro login.' } };
+    }
 
     const { data: existingRiotId, error: riotError } = await admin.from('profiles')
       .select('id').eq('riot_id', riotId).maybeSingle();
     if (riotError) throw riotError;
-    if (existingRiotId) return { status: 409, body: { error: 'Esse Riot ID já está em uso.' } };
+    if (existingRiotId && await isRegisteredProfileActive(admin, existingRiotId.id)) {
+      return { status: 409, body: { error: 'Esse Riot ID já está em uso.' } };
+    }
 
     // Supabase Auth requires an e-mail internally. This private synthetic address is
     // never shown or used for login, verification, or user-facing communication.
