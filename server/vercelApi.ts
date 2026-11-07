@@ -79,6 +79,22 @@ async function getActor(req: ExpressRequest): Promise<{ authUser: AuthUser; prof
 }
 
 function validTournamentState(state: any): state is TournamentState {
+  const reroll = state?.captainRerollRequest;
+  const validReroll = reroll == null || Boolean(typeof reroll === 'object'
+    && typeof reroll.id === 'string' && reroll.id.length > 0
+    && typeof reroll.requesterId === 'string' && typeof reroll.requesterName === 'string'
+    && typeof reroll.opponentId === 'string'
+    && (reroll.status === 'waiting_opponent' || reroll.status === 'waiting_creator')
+    && Number.isFinite(reroll.createdAt)
+    && (reroll.acceptedBy === undefined || typeof reroll.acceptedBy === 'string')
+    && (reroll.acceptedByName === undefined || typeof reroll.acceptedByName === 'string'));
+  const interClassDraw = state?.interClassDraw;
+  const classes = ['Magos', 'Lutadores', 'Assassinos', 'Suportes', 'Atiradores', 'Tanks'];
+  const validClassDraw = interClassDraw == null || Boolean(typeof interClassDraw === 'object'
+    && typeof interClassDraw.cardId === 'string'
+    && classes.includes(interClassDraw.blueClass) && classes.includes(interClassDraw.redClass)
+    && interClassDraw.blueClass !== interClassDraw.redClass
+    && Number.isFinite(interClassDraw.drawnAt));
   return Boolean(state && typeof state === 'object'
     && Number.isFinite(state.updatedAt)
     && Array.isArray(state.teams) && Array.isArray(state.attendeeIds)
@@ -86,6 +102,8 @@ function validTournamentState(state: any): state is TournamentState {
     && Array.isArray(state.playerPoolIds)
     && state.attendeeIds.every((id: unknown) => typeof id === 'string')
     && state.captainIds.every((id: unknown) => typeof id === 'string')
+    && (state.confirmedDeckCardId === undefined || state.confirmedDeckCardId === null || typeof state.confirmedDeckCardId === 'string')
+    && validReroll && validClassDraw
     && state.playerPoolIds.every((id: unknown) => typeof id === 'string')
     && state.teams.every((team: any) => typeof team?.id === 'string'
       && Array.isArray(team.members) && team.members.length <= 5
@@ -94,6 +112,52 @@ function validTournamentState(state: any): state is TournamentState {
     && validFormats.includes(state.seriesFormat)
     && validStages.includes(state.draftStage)
     && typeof state.tournamentStarted === 'boolean');
+}
+
+function sameTournamentExceptReroll(current: TournamentState, next: TournamentState) {
+  const stableValue = (value: any): any => {
+    if (Array.isArray(value)) return value.map(stableValue);
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+  };
+  const comparable = (state: TournamentState) => {
+    const { updatedAt: _updatedAt, captainRerollRequest: _reroll, ...copy } = state;
+    copy.confirmedDeckCardId ??= null;
+    copy.interClassDraw ??= null;
+    return copy;
+  };
+  return JSON.stringify(stableValue(comparable(current))) === JSON.stringify(stableValue(comparable(next)));
+}
+
+function mayChangeCaptainReroll(current: TournamentState | null, state: TournamentState, actorId: string) {
+  if (!current || !sameTournamentExceptReroll(current, state)) return false;
+  const [firstCaptain, secondCaptain] = current.captainIds || [];
+  if (!firstCaptain || !secondCaptain || firstCaptain === secondCaptain
+    || !current.attendeeIds.includes(firstCaptain) || !current.attendeeIds.includes(secondCaptain)
+    || !current.confirmedDeckCardId || ![firstCaptain, secondCaptain].includes(actorId)) return false;
+
+  const existing = current.captainRerollRequest || null;
+  const next = state.captainRerollRequest || null;
+  if (!existing && next) {
+    const opponentId = actorId === firstCaptain ? secondCaptain : firstCaptain;
+    return next.status === 'waiting_opponent'
+      && next.requesterId === actorId
+      && next.opponentId === opponentId
+      && typeof next.requesterName === 'string' && next.requesterName.trim().length > 0
+      && !next.acceptedBy && !next.acceptedByName;
+  }
+  if (existing?.status === 'waiting_opponent' && existing.opponentId === actorId) {
+    if (!next) return true;
+    return next.status === 'waiting_creator'
+      && next.id === existing.id
+      && next.requesterId === existing.requesterId
+      && next.requesterName === existing.requesterName
+      && next.opponentId === existing.opponentId
+      && next.createdAt === existing.createdAt
+      && next.acceptedBy === actorId
+      && typeof next.acceptedByName === 'string' && next.acceptedByName.trim().length > 0;
+  }
+  return false;
 }
 
 async function readTournamentState() {
@@ -180,6 +244,7 @@ async function handleTournament(req: ExpressRequest, res: ExpressResponse) {
     const isCreator = actor.profile.role === 'criador';
     const mayUpdate = isCreator
       || mayEditAttendance(current, state, actor.appId)
+      || mayChangeCaptainReroll(current, state, actor.appId)
       || Boolean(current && mayMakeCaptainPick(current, state, actor.appId));
     if (!mayUpdate) return responseError(res, 403, 'Você não pode alterar esta etapa do torneio.');
     if (current && Number(state.updatedAt) <= Number(current.updatedAt)) return res.status(200).json({ state: current });
@@ -198,6 +263,69 @@ async function handleTournament(req: ExpressRequest, res: ExpressResponse) {
   } catch (error) {
     console.error('Falha ao salvar o estado do torneio:', error);
     return responseError(res, 503, 'Falha ao salvar o estado compartilhado do torneio.');
+  }
+}
+
+export async function handleResetAllSeasons(req: ExpressRequest, res: ExpressResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido.' });
+  const actor = await getActor(req);
+  if (!actor) return responseError(res, 401, 'Entre na sua conta para resetar as temporadas.');
+  if (actor.profile.role !== 'criador') return responseError(res, 403, 'Somente o Criador pode resetar as temporadas.');
+
+  const admin = await getAdminClient();
+  if (!admin) return responseError(res, 503, 'Supabase server-side não está configurado.');
+
+  try {
+    const voteDelete = await admin.from('season_player_votes').delete().gte('season', 1);
+    if (voteDelete.error) throw voteDelete.error;
+
+    const matchDelete = await admin.from('player_match_records').delete().gte('season', 1);
+    if (matchDelete.error) throw matchDelete.error;
+
+    const statsReset = await admin.from('player_match_stats')
+      .update({ kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0, updated_at: new Date().toISOString() })
+      .gte('kills', 0);
+    if (statsReset.error) throw statsReset.error;
+
+    const now = new Date().toISOString();
+    const seasonReset = await admin.from('shared_season_control').upsert({
+      singleton: true,
+      season: 1,
+      status: 'ready',
+      started_at: null,
+      ends_at: null,
+      updated_at: now,
+    }, { onConflict: 'singleton' });
+    if (seasonReset.error) throw seasonReset.error;
+
+    const resetAt = Date.now();
+    const currentTournament = await readTournamentState();
+    const tournamentState: TournamentState = {
+      updatedAt: Math.max(resetAt, Number(currentTournament?.updatedAt || 0) + 1),
+      seasonResetAt: resetAt,
+      attendanceSeason: 1,
+      tournamentStarted: false,
+      attendeeIds: [],
+      captainIds: ['', ''],
+      draftMode: 'random',
+      seriesFormat: 'MD3',
+      predefinedTeams: null,
+      captainDraftTurn: null,
+      playerPoolIds: [],
+      draftStage: 'setup',
+      teams: [],
+    };
+    const tournamentReset = await admin.from('shared_app_state').upsert({
+      state_key: 'tournament',
+      state: tournamentState,
+      updated_at: now,
+    }, { onConflict: 'state_key' });
+    if (tournamentReset.error) throw tournamentReset.error;
+
+    return res.status(200).json({ ok: true, activeSeason: { number: 1, status: 'ready', startedAt: null, endsAt: null }, tournamentState });
+  } catch (error) {
+    console.error('Falha ao resetar as temporadas:', error);
+    return responseError(res, 503, 'Não foi possível concluir o reset compartilhado das temporadas.');
   }
 }
 
@@ -283,6 +411,7 @@ async function dispatch(req: ExpressRequest, res: ExpressResponse) {
       return res.status(result.status).json(result.body);
     }
     if (route === 'tournament-state') return handleTournament(req, res);
+    if (route === 'reset-seasons') return handleResetAllSeasons(req, res);
     if (route === 'presence') return handlePresence(req, res);
     if (route === 'ocr' && req.method === 'POST') return handleOcr(req, res);
     if (route === 'health' && req.method === 'GET') return res.status(200).json({ status: 'ok', app: 'Personas', time: new Date().toISOString() });
