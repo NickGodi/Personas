@@ -13,9 +13,15 @@ import {
   UserRole,
   ActiveSeason,
   SeasonArchive,
+  SeasonCommentArchive,
+  PlayerComment,
   CardOrnamentSettings,
   SharedTournamentState,
+  CaptainRerollRequest,
+  InterClassDraw,
   Lane,
+  MatchRecord,
+  TestRole,
 } from './types';
 import { 
   INITIAL_USERS, 
@@ -44,7 +50,7 @@ import { readStorage, writeStorage } from './utils/storage';
 import { CARD_ORNAMENT_SETTINGS_VERSION, CARD_ORNAMENT_SETTINGS_VERSION_KEY, CARD_ORNAMENT_STORAGE_KEY, DEFAULT_CARD_ORNAMENT_SETTINGS, loadCardOrnamentSettings, loadTierCardOrnamentSettings, migrateCardOrnamentSettings, normalizeCardOrnamentSettings, normalizeTierCardOrnamentSettings, ORNAMENT_TIER_ORDER, TIER_CARD_ORNAMENT_STORAGE_KEY } from './utils/cardOrnament';
 import { formatGold, formatKda, normalizeStats } from './utils/stats';
 import { normalizeEmail, normalizeHandle, normalizeRiotId, validateUniqueUserIdentity } from './utils/userIdentity';
-import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, loadSharedPlayerMatchStats, mergeRegisteredProfiles, saveAuthenticatedProfile, saveSharedCardOrnamentSettings, saveSharedPlayerMatchStats } from './lib/supabase';
+import { supabase, getSupabaseAuthorizationHeaders, loadAuthenticatedProfile, loadRegisteredProfiles, loadSharedCardOrnamentSettings, loadSharedNotifications, loadSharedPlayerMatchRecords, loadSharedSeasonControl, loadSharedSeasonVotes, mergeRegisteredProfiles, saveAuthenticatedProfile, saveSharedCardOrnamentSettings, saveSharedNotification, saveSharedPlayerMatchRecord, saveSharedPlayerMatchStats, saveSharedSeasonControl, saveSharedSeasonVote, setSharedNotificationRead, deleteSharedNotification, deleteSharedSeasonVotes } from './lib/supabase';
 import { 
   Sparkles, 
   Trophy, 
@@ -186,9 +192,120 @@ const MVP_CARD_FLAG_MIGRATION_KEY = 'personas_mvp_match_only_v1';
 const SHARED_TOURNAMENT_STORAGE_KEY = 'personas_shared_tournament_v1';
 const FIRST_SEASON_RESET_MIGRATION_KEY = 'personas_first_season_reset_v1';
 const FIRST_SEASON_VOTE_RESET_MIGRATION_KEY = 'personas_first_season_vote_reset_v1';
+const SEASON_COMMENT_ARCHIVE_STORAGE_KEY = 'personas_comments_by_season_v1';
+const BRUTUS_DEMO_STATS_RESET_KEY = 'personas_brutus_demo_stats_reset_v1';
+const EMPTY_MATCH_STATS: User['stats'] = { kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 };
+
+const averageMatchStats = (records: MatchRecord[]): User['stats'] => {
+  if (!records.length) return { ...EMPTY_MATCH_STATS };
+  const sum = records.reduce((total, record) => ({
+    kills: total.kills + record.stats.kills,
+    deaths: total.deaths + record.stats.deaths,
+    assists: total.assists + record.stats.assists,
+    minions: total.minions + record.stats.minions,
+    gold: total.gold + record.stats.gold,
+  }), { ...EMPTY_MATCH_STATS });
+  return {
+    kills: Math.round(sum.kills / records.length),
+    deaths: Math.round(sum.deaths / records.length),
+    assists: Math.round(sum.assists / records.length),
+    minions: Math.round(sum.minions / records.length),
+    gold: Math.round(sum.gold / records.length),
+  };
+};
+
+const getCommentSeason = (
+  targetUserId: string,
+  comment: PlayerComment,
+  votes: VoteRecord[],
+  archives: SeasonArchive[],
+  activeSeasonNumber: number,
+): number => {
+  if (Number.isInteger(comment.season)) return comment.season!;
+
+  const matchingVote = votes.find((vote) => (
+    vote.targetUserId === targetUserId
+    && vote.score === comment.scoreGiven
+    && (vote.fromUserId === comment.authorId
+      || normalizeHandle(vote.fromUserHandle) === normalizeHandle(comment.authorHandle))
+    && vote.comment?.trim() === comment.text.trim()
+  ));
+  if (matchingVote) return matchingVote.season;
+
+  // Preserve the original demo comments as season-one history, never as live comments.
+  if (comment.id === 'c_1' || comment.id === 'c_2') return 1;
+
+  const createdAt = Date.parse(comment.createdAt);
+  if (Number.isFinite(createdAt)) {
+    const matchingArchive = archives.find((archive) => {
+      if (!archive.startedAt) return false;
+      const startedAt = Date.parse(archive.startedAt);
+      const endedAt = Date.parse(archive.endedAt);
+      return Number.isFinite(startedAt) && Number.isFinite(endedAt) && createdAt >= startedAt && createdAt <= endedAt;
+    });
+    if (matchingArchive) return matchingArchive.number;
+  }
+
+  const latestCompletedSeason = archives
+    .filter((archive) => archive.number < activeSeasonNumber)
+    .sort((a, b) => b.number - a.number)[0];
+  return latestCompletedSeason?.number ?? Math.max(1, activeSeasonNumber - 1);
+};
+
+const mergeSeasonCommentArchive = (
+  previous: SeasonCommentArchive,
+  incoming: SeasonCommentArchive,
+): SeasonCommentArchive => {
+  let changed = false;
+  const next = { ...previous };
+  Object.entries(incoming).forEach(([seasonKey, users]) => {
+    const season = Number(seasonKey);
+    const existingUsers = next[season] || {};
+    let seasonChanged = false;
+    const mergedUsers = { ...existingUsers };
+    Object.entries(users).forEach(([userId, comments]) => {
+      const existingComments = existingUsers[userId] || [];
+      const existingIds = new Set(existingComments.map((comment) => comment.id));
+      const newComments = comments.filter((comment) => !existingIds.has(comment.id));
+      if (!newComments.length) return;
+      seasonChanged = true;
+      mergedUsers[userId] = [...newComments, ...existingComments];
+    });
+    if (!seasonChanged) return;
+    changed = true;
+    next[season] = mergedUsers;
+  });
+  return changed ? next : previous;
+};
+
+const resetLegacyBrutusDemoStats = () => {
+  if (readStorage<boolean>(BRUTUS_DEMO_STATS_RESET_KEY, false)) return;
+  const savedUsers = readStorage<User[]>('personas_users_v2', INITIAL_USERS);
+  const target = savedUsers.find((user) => user.id === 'user_brutus');
+  if (!target) return;
+  const activeSeason = readStorage<ActiveSeason>('personas_active_season_v1', { number: 1, status: 'ready', startedAt: null, endsAt: null });
+  const records = readStorage<MatchRecord[]>('personas_match_records_v1', []);
+  const hasRecordedMatch = records.some((record) => record.playerId === target.id && record.season === activeSeason.number);
+  const stats = normalizeStats(target.stats);
+  const isSeedStats = stats.kills === 3 && stats.deaths === 8 && stats.assists === 3 && stats.minions === 0 && stats.gold === 0;
+  if (!hasRecordedMatch && isSeedStats) {
+    writeStorage('personas_users_v2', savedUsers.map((user) => user.id === target.id ? { ...user, stats: { ...EMPTY_MATCH_STATS } } : user));
+    const savedCards = readStorage<CardItem[]>('personas_cards_v2', []);
+    writeStorage('personas_cards_v2', savedCards.map((card) => {
+      const cardStats = normalizeStats(card.stats);
+      const hasRecordedSeasonMatch = records.some((record) => record.playerId === target.id && record.season === card.season);
+      return card.userId === target.id && !hasRecordedSeasonMatch
+        && cardStats.kills === 3 && cardStats.deaths === 8 && cardStats.assists === 3
+        ? { ...card, stats: { ...EMPTY_MATCH_STATS } }
+        : card;
+    }));
+  }
+  writeStorage(BRUTUS_DEMO_STATS_RESET_KEY, true);
+};
 
 const normalizeSharedTournament = (value?: Partial<SharedTournamentState> | null): SharedTournamentState => {
-  const attendeeIds = [...new Set(Array.isArray(value?.attendeeIds) ? value.attendeeIds : [])];
+  const attendeeIds = [...new Set((Array.isArray(value?.attendeeIds) ? value.attendeeIds : [])
+    .filter((id): id is string => typeof id === 'string' && id.trim().length > 0))];
   const rawCaptains = Array.isArray(value?.captainIds) ? value.captainIds : ['', ''];
   const firstCaptain = attendeeIds.includes(rawCaptains[0] || '') ? rawCaptains[0] : '';
   const secondCaptain = rawCaptains[1] && rawCaptains[1] !== firstCaptain && attendeeIds.includes(rawCaptains[1])
@@ -206,9 +323,46 @@ const normalizeSharedTournament = (value?: Partial<SharedTournamentState> | null
         ...team.members.filter((id) => attendeeSet.has(id)),
       ])].slice(0, 5),
     }));
+  const rawReroll = value?.captainRerollRequest;
+  const captainRerollRequest: CaptainRerollRequest | null = rawReroll
+    && typeof rawReroll.id === 'string'
+    && typeof rawReroll.requesterId === 'string'
+    && typeof rawReroll.requesterName === 'string'
+    && typeof rawReroll.opponentId === 'string'
+    && (rawReroll.status === 'waiting_opponent' || rawReroll.status === 'waiting_creator')
+    && Number.isFinite(rawReroll.createdAt)
+    ? {
+        id: rawReroll.id,
+        requesterId: rawReroll.requesterId,
+        requesterName: rawReroll.requesterName,
+        opponentId: rawReroll.opponentId,
+        status: rawReroll.status,
+        ...(typeof rawReroll.acceptedBy === 'string' ? { acceptedBy: rawReroll.acceptedBy } : {}),
+        ...(typeof rawReroll.acceptedByName === 'string' ? { acceptedByName: rawReroll.acceptedByName } : {}),
+        createdAt: rawReroll.createdAt,
+      }
+    : null;
+  const rawInterClassDraw = value?.interClassDraw;
+  const interClassDraw: InterClassDraw | null = rawInterClassDraw
+    && typeof rawInterClassDraw.cardId === 'string'
+    && typeof rawInterClassDraw.blueClass === 'string'
+    && typeof rawInterClassDraw.redClass === 'string'
+    && Number.isFinite(rawInterClassDraw.drawnAt)
+    ? {
+        cardId: rawInterClassDraw.cardId,
+        blueClass: rawInterClassDraw.blueClass,
+        redClass: rawInterClassDraw.redClass,
+        drawnAt: rawInterClassDraw.drawnAt,
+      }
+    : null;
 
   return {
     updatedAt: value?.updatedAt || 0,
+    ...(Number.isFinite(value?.seasonResetAt) ? { seasonResetAt: value?.seasonResetAt } : {}),
+    confirmedDeckCardId: typeof value?.confirmedDeckCardId === 'string' ? value.confirmedDeckCardId : null,
+    captainRerollRequest,
+    interClassDraw,
+    ...(Number.isFinite(value?.attendanceSeason) ? { attendanceSeason: value?.attendanceSeason } : {}),
     tournamentStarted,
     attendeeIds,
     captainIds,
@@ -285,6 +439,7 @@ const normalizeUserList = (users: User[]): User[] => {
     return {
       ...normalized,
       isOnline: false,
+      role: user.role === 'criador' ? 'criador' : 'jogador',
       primaryLane: knownLanes.includes(user.primaryLane) ? user.primaryLane : 'PREENCHER',
       // Criminal status belongs to a completed season card, never to a live player profile.
       isCriminoso: false,
@@ -366,6 +521,7 @@ const loadDeck = (): MatchDeckCard[] => {
 };
 
 export default function App() {
+  resetLegacyBrutusDemoStats();
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     const savedTheme = readStorage<'dark' | 'light'>('personas_theme_v1', 'dark');
     return savedTheme === 'light' ? 'light' : 'dark';
@@ -390,6 +546,9 @@ export default function App() {
   });
   const teams = sharedTournament.teams;
   const [isSharedTournamentReady, setIsSharedTournamentReady] = useState(false);
+  const [isCheckInSaving, setIsCheckInSaving] = useState(false);
+  const checkInSavingRef = useRef(false);
+  const previousTournamentNotificationsRef = useRef<{ started: boolean; assignments: Map<string, string> } | null>(null);
   const [presets, setPresets] = useState<DraftPreset[]>(() =>
     readStorage('personas_presets_v2', INITIAL_PRESETS)
   );
@@ -417,9 +576,13 @@ export default function App() {
       endsAt: null,
     })
   );
+  const activeSeasonRef = useRef(activeSeason);
   const [seasonEvent, setSeasonEvent] = useState<{ kind: 'start' | 'finish'; season: number; automatic?: boolean; id: number } | null>(null);
   const [seasonArchives, setSeasonArchives] = useState<SeasonArchive[]>(() =>
     readStorage('personas_season_archives_v1', [])
+  );
+  const [seasonCommentArchive, setSeasonCommentArchive] = useState<SeasonCommentArchive>(() =>
+    readStorage(SEASON_COMMENT_ARCHIVE_STORAGE_KEY, {})
   );
 
   const [notifications, setNotifications] = useState<NotificationItem[]>(() => readStorage<NotificationItem[]>('personas_notifications_v1', [
@@ -441,7 +604,7 @@ export default function App() {
       senderName: 'Derick (Lenda Viva)',
       senderHandle: '@derick',
       senderAvatar: users.find((u) => u.id === 'user_derick')?.avatar || '',
-      senderRole: 'capitao',
+      senderRole: 'jogador',
       text: 'Fala galera! Hoje tem draft com Agentes Livres e sorteio no Personas.',
       timestamp: '20:15',
       channel: 'global',
@@ -461,6 +624,12 @@ export default function App() {
 
   const [recentVotes, setRecentVotes] = useState<VoteRecord[]>(() =>
     readStorage('personas_votes_v1', [])
+  );
+  const pendingSharedVotesRef = useRef<Map<string, VoteRecord>>(new Map());
+  const seasonResetGenerationRef = useRef(0);
+  const [isSharedVotingReady, setIsSharedVotingReady] = useState(() => !supabase);
+  const [matchRecords, setMatchRecords] = useState<MatchRecord[]>(() =>
+    readStorage('personas_match_records_v1', [])
   );
   const cardsWithAverage = useMemo(() => {
     const usersWithVotes = new Set(recentVotes.map((vote) => vote.targetUserId));
@@ -484,7 +653,83 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => startsAsLocalCreator ? creatorUser : null);
   const [isCreatorSession, setIsCreatorSession] = useState(startsAsLocalCreator);
   const [isImpersonating, setIsImpersonating] = useState<boolean>(false);
+  const [isCaptainRolePreview, setIsCaptainRolePreview] = useState(false);
+  // Local creator impersonation is a preview tool; keep its test votes in this browser only.
+  const canSimulateLocalVotes = isLocalPreview && isImpersonating;
+  const isVotingReadyForCurrentSession = isSharedVotingReady || canSimulateLocalVotes;
+  const canCurrentUserVoteInSeason = Boolean(currentUser
+    && activeSeason.status === 'active'
+    && isVotingReadyForCurrentSession
+    && (!isImpersonating || canSimulateLocalVotes));
+  // Authentication IDs can differ from the stable roster IDs used by attendance and teams.
+  // Resolve both stored check-ins and the active account to the same roster identity.
+  const currentRosterUser = currentUser
+    ? users.find((user) => user.id === currentUser.id)
+      || (currentUser.authId ? users.find((user) => user.authId === currentUser.authId) : undefined)
+      || users.find((user) => normalizeHandle(user.handle) === normalizeHandle(currentUser.handle))
+    : undefined;
+  const currentRosterUserId = currentRosterUser?.id || currentUser?.id || null;
+  const resolveRosterUserId = (id: string) => {
+    if (currentUser && (id === currentUser.id || id === currentUser.authId)) return currentRosterUserId || id;
+    return users.find((user) => user.id === id || user.authId === id)?.id || id;
+  };
+  const canonicalRosterIds = (ids: string[]) => [...new Set(ids
+    .map(resolveRosterUserId)
+    .filter((id) => users.some((user) => user.id === id)))];
+  const checkedInRosterIds = canonicalRosterIds(sharedTournament.attendeeIds);
   const canAccessCreatorPanel = currentUser?.id === creatorUser.id && !isImpersonating;
+  const voteDisabledReason = !currentUser
+    ? 'Entre na sua conta para avaliar.'
+    : activeSeason.status !== 'active'
+      ? 'A votação abre quando a temporada começa e fecha quando ela termina.'
+      : isImpersonating && !canSimulateLocalVotes
+        ? 'Volte para sua conta para registrar um voto com sua própria identidade.'
+        : supabase && !isVotingReadyForCurrentSession
+          ? 'Aguarde a sincronização da temporada e dos votos.'
+          : 'A votação está indisponível no momento.';
+  const visibleNotifications = useMemo(() => notifications.filter((notification) => (
+    currentUser
+    && notification.userId === currentUser.id
+    && (notification.type !== 'vote' || canAccessCreatorPanel)
+    && (!isImpersonating || notification.type !== 'report')
+  )), [notifications, currentUser?.id, canAccessCreatorPanel, isImpersonating]);
+
+  const publishNotifications = useCallback((items: NotificationItem[]) => {
+    if (!items.length) return;
+    setNotifications((previous) => [
+      ...items.filter((item) => !previous.some((existing) => existing.id === item.id)),
+      ...previous,
+    ].slice(0, 200));
+    if (!supabase || !canAccessCreatorPanel) return;
+    items.forEach((item) => {
+      if (item.type === 'vote') return;
+      const recipient = item.userId === creatorUser.id
+        ? creatorUser
+        : users.find((user) => user.id === item.userId);
+      if (!recipient?.authId) return;
+      void saveSharedNotification(item, recipient.authId).catch((error) => {
+        console.warn('Não foi possível salvar uma notificação compartilhada.', error);
+      });
+    });
+  }, [canAccessCreatorPanel, creatorUser, users]);
+
+  const handleMarkNotificationRead = useCallback((id: string) => {
+    setNotifications((previous) => previous.map((notification) => notification.id === id ? { ...notification, read: true } : notification));
+    void setSharedNotificationRead(id, true).catch((error) => console.warn('Não foi possível marcar a notificação como lida.', error));
+  }, []);
+
+  const handleDeleteNotification = useCallback((id: string) => {
+    setNotifications((previous) => previous.filter((notification) => notification.id !== id));
+    void deleteSharedNotification(id).catch((error) => console.warn('Não foi possível excluir a notificação compartilhada.', error));
+  }, []);
+
+  const handleMarkAllNotificationsRead = useCallback(() => {
+    const unreadIds = visibleNotifications.filter((notification) => !notification.read).map((notification) => notification.id);
+    setNotifications((previous) => previous.map((notification) => unreadIds.includes(notification.id) ? { ...notification, read: true } : notification));
+    unreadIds.forEach((id) => {
+      void setSharedNotificationRead(id, true).catch((error) => console.warn('Não foi possível sincronizar a leitura da notificação.', error));
+    });
+  }, [visibleNotifications]);
   // Role preview and account impersonation change the displayed user, not the signed-in session.
   const presenceActorId = isCreatorSession ? creatorUser.id : currentUser?.id || null;
   const presenceSessionId = useMemo(() => {
@@ -561,6 +806,32 @@ export default function App() {
     });
   };
 
+  const persistSharedTournament = async (state: SharedTournamentState, actorId: string, actorRole: string) => {
+    try {
+      const isLocalPreview = import.meta.env.DEV && window.location.hostname === 'localhost';
+      const authorization = isLocalPreview ? {} : await getSupabaseAuthorizationHeaders();
+      const response = await fetch('/api/tournament-state', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authorization },
+        body: JSON.stringify({ state, actorId, actorRole }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        console.warn('Não foi possível sincronizar o estado do torneio:', response.status, payload?.error || 'erro desconhecido');
+        return;
+      }
+      const payload = await response.json();
+      if (payload.state) {
+        const normalizedState = normalizeSharedTournament(payload.state as Partial<SharedTournamentState>);
+        setSharedTournament((previous) => Number(normalizedState.updatedAt) > previous.updatedAt
+          ? normalizedState
+          : previous);
+      }
+    } catch (error) {
+      console.warn('Não foi possível sincronizar o estado do torneio:', error);
+    }
+  };
+
   const handleSetTeamCaptain = (userId: string, slot: 0 | 1 | null) => {
     updateSharedTournament((previous) => {
       if (previous.tournamentStarted) return {};
@@ -593,7 +864,7 @@ export default function App() {
 
   // Cards gallery filters
   const [cardTierFilter, setCardTierFilter] = useState<string>('all');
-  const [cardSeasonFilter, setCardSeasonFilter] = useState<string>('all');
+  const [cardSeasonFilter, setCardSeasonFilter] = useState<string>('current');
   const [cardLaneFilter, setCardLaneFilter] = useState<string>('all');
   const [cardAwardFilter, setCardAwardFilter] = useState<string>('all');
   const [cardSearchQuery, setCardSearchQuery] = useState<string>('');
@@ -602,6 +873,49 @@ export default function App() {
   useEffect(() => {
     writeStorage('personas_users_v2', users);
   }, [users]);
+
+  // Migrate legacy profile comments into their season archive and keep only this season's comments active.
+  useEffect(() => {
+    const archivedComments: SeasonCommentArchive = {};
+    setUsers((previous) => {
+      let changed = false;
+      const next = previous.map((user) => {
+        if (!user.comments?.length) return user;
+        const activeComments: PlayerComment[] = [];
+        user.comments.forEach((comment) => {
+          if (comment.id === 'c_1' || comment.id === 'c_2') {
+            archivedComments[1] ||= {};
+            archivedComments[1][user.id] ||= [];
+            archivedComments[1][user.id].push({ ...comment, season: 1 });
+            changed = true;
+            return;
+          }
+          const season = getCommentSeason(user.id, comment, recentVotes, seasonArchives, activeSeason.number);
+          const seasonalComment = comment.season === season ? comment : { ...comment, season };
+          if (season === activeSeason.number) {
+            activeComments.push(seasonalComment);
+          } else {
+            archivedComments[season] ||= {};
+            archivedComments[season][user.id] ||= [];
+            archivedComments[season][user.id].push(seasonalComment);
+          }
+          if (season !== activeSeason.number || comment.season !== season) changed = true;
+        });
+        if (activeComments.length === user.comments.length
+          && activeComments.every((comment, index) => comment === user.comments[index])) return user;
+        changed = true;
+        return { ...user, comments: activeComments };
+      });
+      return changed ? next : previous;
+    });
+    if (Object.keys(archivedComments).length) {
+      setSeasonCommentArchive((previous) => mergeSeasonCommentArchive(previous, archivedComments));
+    }
+  }, [users, recentVotes, activeSeason.number, seasonArchives]);
+
+  useEffect(() => {
+    writeStorage(SEASON_COMMENT_ARCHIVE_STORAGE_KEY, seasonCommentArchive);
+  }, [seasonCommentArchive]);
 
   // Pull registered public profiles so all visitors see the same player directory.
   useEffect(() => {
@@ -623,43 +937,66 @@ export default function App() {
     };
   }, []);
 
-  // Keep the latest imported match statistics visible to every visitor.
+  // Use the shared match history as the source for the active season averages.
+  useEffect(() => {
+    const recordsByPlayer = new Map<string, MatchRecord[]>();
+    matchRecords.filter((record) => record.season === activeSeason.number).forEach((record) => {
+      recordsByPlayer.set(record.playerId, [...(recordsByPlayer.get(record.playerId) || []), record]);
+    });
+    setUsers((previous) => {
+      let changed = false;
+      const next = previous.map((user) => {
+        const records = recordsByPlayer.get(user.id);
+        const stats = records?.length ? averageMatchStats(records) : EMPTY_MATCH_STATS;
+        const isUnchanged = user.stats.kills === stats.kills
+          && user.stats.deaths === stats.deaths
+          && user.stats.assists === stats.assists
+          && user.stats.minions === stats.minions
+          && user.stats.gold === stats.gold;
+        if (isUnchanged) return user;
+        changed = true;
+        return { ...user, stats: { ...stats } };
+      });
+      return changed ? next : previous;
+    });
+    setCards((previous) => {
+      let changed = false;
+      const next = previous.map((card) => {
+        if (card.season !== activeSeason.number) return card;
+        const records = recordsByPlayer.get(card.userId);
+        const stats = records?.length ? averageMatchStats(records) : EMPTY_MATCH_STATS;
+        const isUnchanged = card.stats.kills === stats.kills
+          && card.stats.deaths === stats.deaths
+          && card.stats.assists === stats.assists
+          && card.stats.minions === stats.minions
+          && card.stats.gold === stats.gold;
+        if (isUnchanged) return card;
+        changed = true;
+        return { ...card, stats: { ...stats } };
+      });
+      return changed ? next : previous;
+    });
+  }, [matchRecords, activeSeason.number, users, cards]);
+
+  // Keep the complete seasonal match history synchronized for every visitor.
   useEffect(() => {
     if (!supabase) return;
     let isDisposed = false;
-    const refreshMatchStats = async () => {
+    const refreshMatchRecords = async () => {
       try {
-        const rows = await loadSharedPlayerMatchStats();
-        if (isDisposed || !rows) return;
-        const byPlayerId = new Map(rows.map((row) => [row.playerId, normalizeStats(row.stats)]));
-        setUsers((previous) => {
-          let changed = false;
-          const updated = previous.map((user) => {
-            const stats = byPlayerId.get(user.id);
-            if (!stats) return user;
-            if (user.stats.kills === stats.kills && user.stats.deaths === stats.deaths
-              && user.stats.assists === stats.assists && user.stats.minions === stats.minions
-              && user.stats.gold === stats.gold) return user;
-            changed = true;
-            return { ...user, stats };
-          });
-          return changed ? updated : previous;
-        });
-        setCards((previous) => previous.map((card) => {
-          const stats = card.season === activeSeason.number ? byPlayerId.get(card.userId) : undefined;
-          return stats ? { ...card, stats } : card;
-        }));
+        const rows = await loadSharedPlayerMatchRecords();
+        if (!isDisposed && rows) setMatchRecords(rows);
       } catch {
-        // Keep the latest locally cached values available if the shared database is temporarily offline.
+        // Keep the locally cached season history available if Supabase is temporarily offline.
       }
     };
-    void refreshMatchStats();
-    const interval = window.setInterval(() => { void refreshMatchStats(); }, 15_000);
+    void refreshMatchRecords();
+    const interval = window.setInterval(() => { void refreshMatchRecords(); }, 15_000);
     return () => {
       isDisposed = true;
       window.clearInterval(interval);
     };
-  }, [activeSeason.number]);
+  }, []);
 
   // Restore the shared Supabase session and keep sign-in/out in sync with the interface.
   useEffect(() => {
@@ -777,6 +1114,37 @@ export default function App() {
   }, [notifications]);
 
   useEffect(() => {
+    if (!supabase || !currentUser?.authId || isImpersonating) return;
+    let isDisposed = false;
+    let isSyncing = false;
+    const syncNotifications = async () => {
+      if (isSyncing) return;
+      isSyncing = true;
+      try {
+        const sharedNotifications = await loadSharedNotifications(currentUser.id);
+        if (!sharedNotifications || isDisposed) return;
+        setNotifications((previous) => {
+          const sharedIds = new Set(sharedNotifications.map((notification) => notification.id));
+          const localOnlyForCurrentUser = previous.filter((notification) => (
+            notification.userId === currentUser.id && !sharedIds.has(notification.id)
+          ));
+          return [...sharedNotifications, ...localOnlyForCurrentUser].slice(0, 200);
+        });
+      } catch (error) {
+        console.warn('Não foi possível sincronizar as notificações da conta.', error);
+      } finally {
+        isSyncing = false;
+      }
+    };
+    void syncNotifications();
+    const interval = window.setInterval(() => { void syncNotifications(); }, 15_000);
+    return () => {
+      isDisposed = true;
+      window.clearInterval(interval);
+    };
+  }, [currentUser?.authId, currentUser?.id, isImpersonating]);
+
+  useEffect(() => {
     writeStorage('personas_cblow_cards_v1', true);
   }, []);
 
@@ -786,12 +1154,176 @@ export default function App() {
   }, [sharedTournament]);
 
   useEffect(() => {
+    const resetAt = sharedTournament.seasonResetAt;
+    if (typeof resetAt !== 'number' || !Number.isFinite(resetAt)) return;
+    const appliedResetAt = readStorage<number>('personas_last_season_reset_v1', 0);
+    if (Number(resetAt) <= appliedResetAt) return;
+
+    seasonResetGenerationRef.current += 1;
+    writeStorage('personas_last_season_reset_v1', Number(resetAt));
+    const firstSeason: ActiveSeason = { number: 1, status: 'ready', startedAt: null, endsAt: null };
+    activeSeasonRef.current = firstSeason;
+    setActiveSeason(firstSeason);
+    setSeasonEvent(null);
+    setSeasonArchives([]);
+    setSeasonCommentArchive({});
+    setRecentVotes([]);
+    pendingSharedVotesRef.current.clear();
+    setMatchRecords([]);
+    setCards([]);
+    setUsers((previous) => previous.map((user) => ({
+      ...user,
+      currentScore: 0,
+      totalVotes: 0,
+      seasonsPlayed: 0,
+      mvpCount: 0,
+      aceCount: 0,
+      isCriminoso: false,
+      isMencaoHonrosa: false,
+      isLegend: false,
+      stats: { ...EMPTY_MATCH_STATS },
+      comments: [],
+    })));
+  }, [sharedTournament.seasonResetAt]);
+
+  useEffect(() => {
+    if (!isSharedTournamentReady || !isSharedVotingReady || !canAccessCreatorPanel) return;
+
+    const attendanceSeason = sharedTournament.attendanceSeason;
+    if (attendanceSeason === activeSeason.number) return;
+
+    const resetPreviousTeams = activeSeason.status === 'ready'
+      && (attendanceSeason === undefined || attendanceSeason < activeSeason.number)
+      && sharedTournament.tournamentStarted;
+    updateSharedTournament({
+      attendanceSeason: activeSeason.number,
+      ...(resetPreviousTeams ? {
+        tournamentStarted: false,
+        attendeeIds: [],
+        captainIds: ['', ''],
+        predefinedTeams: null,
+        captainDraftTurn: null,
+        playerPoolIds: [],
+        draftStage: 'setup',
+        teams: [],
+      } : {}),
+    });
+  }, [activeSeason.number, activeSeason.status, canAccessCreatorPanel, isSharedTournamentReady, isSharedVotingReady, sharedTournament.attendanceSeason, sharedTournament.tournamentStarted]);
+
+  useEffect(() => {
+    if (!isSharedTournamentReady) return;
+    const assignments = new Map<string, string>();
+    sharedTournament.teams.forEach((team) => {
+      team.members.forEach((userId) => assignments.set(userId, team.name));
+      if (team.captainId) assignments.set(team.captainId, team.name);
+    });
+    const previous = previousTournamentNotificationsRef.current;
+    if (previous && canAccessCreatorPanel) {
+      const eventTimestamp = sharedTournament.updatedAt;
+      const items: NotificationItem[] = [];
+      if (!previous.started && sharedTournament.tournamentStarted) {
+        users.forEach((user) => items.push({
+          id: `tournament-start:${eventTimestamp}:${user.id}`,
+          userId: user.id,
+          title: 'Torneio Personas iniciado',
+          message: 'O criador iniciou o torneio. Confira a aba Times para acompanhar as equipes.',
+          type: 'system',
+          read: false,
+          createdAt: 'Agora',
+        }));
+      }
+      assignments.forEach((teamName, userId) => {
+        if (previous.assignments.get(userId) === teamName) return;
+        const player = users.find((user) => user.id === userId);
+        if (!player) return;
+        items.push({
+          id: `team-assigned:${eventTimestamp}:${userId}`,
+          userId,
+          title: 'Você foi escolhido para um time',
+          message: `Você está na equipe ${teamName}. Acesse Times para ver a escalação.`,
+          type: 'team',
+          read: false,
+          createdAt: 'Agora',
+        });
+      });
+      publishNotifications(items);
+    }
+    previousTournamentNotificationsRef.current = {
+      started: sharedTournament.tournamentStarted,
+      assignments,
+    };
+  }, [isSharedTournamentReady, sharedTournament.tournamentStarted, sharedTournament.updatedAt, sharedTournament.teams, users, canAccessCreatorPanel, publishNotifications]);
+
+  useEffect(() => {
     writeStorage('personas_presets_v2', presets);
   }, [presets]);
 
   useEffect(() => {
     writeStorage('personas_reports_v2', reports);
   }, [reports]);
+
+  useEffect(() => {
+    activeSeasonRef.current = activeSeason;
+  }, [activeSeason]);
+
+  // Season closure and votes are shared so the season's voting rules apply to every account.
+  useEffect(() => {
+    if (!supabase) {
+      setIsSharedVotingReady(true);
+      return;
+    }
+    let isDisposed = false;
+    let isSyncing = false;
+    const syncSharedVoting = async () => {
+      if (isSyncing) return;
+      isSyncing = true;
+      const resetGeneration = seasonResetGenerationRef.current;
+      try {
+        const [sharedSeason, sharedVotes] = await Promise.all([
+          loadSharedSeasonControl(),
+          loadSharedSeasonVotes(),
+        ]);
+        if (isDisposed || resetGeneration !== seasonResetGenerationRef.current) return;
+        if (sharedSeason && JSON.stringify(sharedSeason) !== JSON.stringify(activeSeasonRef.current)) {
+          const previousSeason = activeSeasonRef.current;
+          activeSeasonRef.current = sharedSeason;
+          const isFullSeasonReset = sharedSeason.number === 1 && sharedSeason.status === 'ready'
+            && (previousSeason.number !== 1 || previousSeason.status !== 'ready');
+          if (!isFullSeasonReset && (previousSeason.number !== sharedSeason.number || previousSeason.status !== sharedSeason.status)) {
+            setSeasonEvent({
+              kind: sharedSeason.status === 'active' ? 'start' : 'finish',
+              season: sharedSeason.status === 'active' ? sharedSeason.number : previousSeason.number,
+              automatic: sharedSeason.status !== 'active',
+              id: Date.now(),
+            });
+          }
+          setActiveSeason(sharedSeason);
+        }
+        if (sharedVotes) setRecentVotes((previous) => {
+          const sharedIds = new Set(sharedVotes.map((vote) => vote.id));
+          const pendingSharedVotes = [...pendingSharedVotesRef.current.values()]
+            .filter((vote) => !sharedIds.has(vote.id));
+          sharedIds.forEach((id) => pendingSharedVotesRef.current.delete(id));
+          const localSimulationVotes = isLocalPreview
+            ? previous.filter((vote) => vote.id.startsWith('local_sim_vote_') && !sharedIds.has(vote.id))
+            : [];
+          const mergedVotes = [...sharedVotes, ...pendingSharedVotes, ...localSimulationVotes];
+          return JSON.stringify(previous) === JSON.stringify(mergedVotes) ? previous : mergedVotes;
+        });
+        setIsSharedVotingReady(true);
+      } catch (error) {
+        console.warn('Não foi possível sincronizar as temporadas e as notas.', error);
+      } finally {
+        isSyncing = false;
+      }
+    };
+    void syncSharedVoting();
+    const interval = window.setInterval(() => { void syncSharedVoting(); }, 10_000);
+    return () => {
+      isDisposed = true;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     writeStorage('personas_active_season_v1', activeSeason);
@@ -804,6 +1336,10 @@ export default function App() {
   useEffect(() => {
     writeStorage('personas_votes_v1', recentVotes);
   }, [recentVotes]);
+
+  useEffect(() => {
+    writeStorage('personas_match_records_v1', matchRecords);
+  }, [matchRecords]);
 
   useEffect(() => {
     let isDisposed = false;
@@ -848,28 +1384,7 @@ export default function App() {
 
   useEffect(() => {
     if (!isSharedTournamentReady || !currentUser) return;
-    let isDisposed = false;
-    void getSupabaseAuthorizationHeaders().then((authorization) => fetch('/api/tournament-state', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', ...authorization },
-      body: JSON.stringify({
-        state: sharedTournament,
-        actorId: currentUser.id,
-        actorRole: canAccessCreatorPanel ? 'criador' : 'viewer',
-      }),
-    })).then(async (response) => {
-      if (!response.ok || isDisposed) return;
-      const payload = await response.json();
-      if (payload.state) {
-        const normalizedState = normalizeSharedTournament(payload.state as Partial<SharedTournamentState>);
-        setSharedTournament((previous) => JSON.stringify(normalizedState) !== JSON.stringify(previous)
-          ? normalizedState
-          : previous);
-      }
-    }).catch(() => {
-      // The next polling cycle will pick up shared changes when the connection returns.
-    });
-    return () => { isDisposed = true; };
+    void persistSharedTournament(sharedTournament, currentUser.id, canAccessCreatorPanel ? 'criador' : 'viewer');
   }, [sharedTournament, isSharedTournamentReady, currentUser?.id, currentUser?.role, canAccessCreatorPanel]);
 
   useEffect(() => {
@@ -884,7 +1399,16 @@ export default function App() {
         } else if (event.key === 'personas_season_archives_v1' && Array.isArray(value)) {
           setSeasonArchives(value);
         } else if (event.key === 'personas_votes_v1' && Array.isArray(value)) {
-          setRecentVotes(value);
+          setRecentVotes((previous) => {
+            const incomingIds = new Set((value as VoteRecord[]).map((vote) => vote.id));
+            const pendingSharedVotes = [...pendingSharedVotesRef.current.values()]
+              .filter((vote) => !incomingIds.has(vote.id));
+            const localSimulationVotes = isLocalPreview
+              ? previous.filter((vote) => vote.id.startsWith('local_sim_vote_') && !incomingIds.has(vote.id))
+              : [];
+            const mergedVotes = [...value as VoteRecord[], ...pendingSharedVotes, ...localSimulationVotes];
+            return JSON.stringify(previous) === JSON.stringify(mergedVotes) ? previous : mergedVotes;
+          });
         } else if (event.key === SHARED_TOURNAMENT_STORAGE_KEY && Number.isFinite(value?.updatedAt)) {
           const normalizedState = normalizeSharedTournament(value as Partial<SharedTournamentState>);
           setSharedTournament((previous) => Number(normalizedState.updatedAt) > previous.updatedAt
@@ -928,26 +1452,70 @@ export default function App() {
     return () => window.clearTimeout(timeout);
   }, [seasonEvent]);
 
-  const handleToggleTournamentAttendance = (targetUserId?: string) => {
+  const handleToggleTournamentAttendance = (requestedTargetUserId?: string) => {
     if (!currentUser) {
-      if (!targetUserId) setIsLoginModalOpen(true);
+      if (!requestedTargetUserId) setIsLoginModalOpen(true);
       return;
     }
-    if ((targetUserId && !canAccessCreatorPanel) || activeSeason.status === 'active' || sharedTournament.tournamentStarted || !isSharedTournamentReady) return;
-    const attendeeId = targetUserId || currentUser.id;
-    updateSharedTournament((previous) => ({
-      attendeeIds: previous.attendeeIds.includes(attendeeId)
-        ? previous.attendeeIds.filter((id) => id !== attendeeId)
-        : [...previous.attendeeIds, attendeeId],
-      captainIds: previous.captainIds.map((id) => previous.attendeeIds.includes(attendeeId) && id === attendeeId ? '' : id) as [string, string],
-    }));
+    if (checkInSavingRef.current) return;
+    // React's onClick passes a MouseEvent. Never treat it as a roster ID.
+    const targetUserId = typeof requestedTargetUserId === 'string' && requestedTargetUserId.trim()
+      ? requestedTargetUserId
+      : undefined;
+    const ownRosterUserId = currentRosterUserId || currentUser.id;
+    if ((targetUserId && !canAccessCreatorPanel && targetUserId !== ownRosterUserId) || activeSeason.status === 'active' || sharedTournament.tournamentStarted || !isSharedTournamentReady
+      || (sharedTournament.attendanceSeason !== undefined && sharedTournament.attendanceSeason !== activeSeason.number)) return;
+    const attendeeId = targetUserId && canAccessCreatorPanel ? targetUserId : ownRosterUserId;
+    const previous = normalizeSharedTournament(sharedTournament);
+    const normalizedAttendeeIds = canonicalRosterIds(previous.attendeeIds);
+    const wasCheckedIn = normalizedAttendeeIds.includes(attendeeId);
+    const nextState = normalizeSharedTournament({
+      ...previous,
+      attendeeIds: wasCheckedIn
+        ? normalizedAttendeeIds.filter((id) => id !== attendeeId)
+        : [...normalizedAttendeeIds, attendeeId],
+      captainIds: previous.captainIds.map((id) => wasCheckedIn && resolveRosterUserId(id) === attendeeId ? '' : id) as [string, string],
+      updatedAt: Math.max(Date.now(), previous.updatedAt + 1),
+    });
+    setSharedTournament(nextState);
+    checkInSavingRef.current = true;
+    setIsCheckInSaving(true);
+    void persistSharedTournament(nextState, currentUser.id, canAccessCreatorPanel ? 'criador' : 'viewer')
+      .finally(() => {
+        checkInSavingRef.current = false;
+        setIsCheckInSaving(false);
+      });
   };
 
-  const handleStartSeason = () => {
+  const handleStartSeason = async () => {
     if (activeSeason.status === 'active' || currentUser?.role !== 'criador' || isImpersonating) return;
+    if (sharedTournament.attendanceSeason !== undefined && sharedTournament.attendanceSeason !== activeSeason.number) {
+      window.alert('Aguarde a sincronização do check-in desta temporada antes de iniciar.');
+      return;
+    }
+    if (sharedTournament.attendeeIds.length === 0) {
+      window.alert('Confirme o check-in de pelo menos uma pessoa antes de iniciar a temporada.');
+      return;
+    }
     const startedAt = new Date();
     const seasonNumber = activeSeason.number;
-    const seasonUsers = users.map((user) => ({ ...user, isCriminoso: false }));
+    const nextSeason: ActiveSeason = {
+      number: seasonNumber,
+      status: 'active',
+      startedAt: startedAt.toISOString(),
+      endsAt: new Date(startedAt.getTime() + 7 * 60 * 60 * 1000).toISOString(),
+    };
+    if (supabase && !isSharedVotingReady) {
+      window.alert('Aguarde a sincronização da temporada antes de iniciar.');
+      return;
+    }
+    try {
+      await saveSharedSeasonControl(nextSeason);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Não foi possível abrir a temporada compartilhada.');
+      return;
+    }
+    const seasonUsers = users.map((user) => ({ ...user, isCriminoso: false, stats: { ...EMPTY_MATCH_STATS } }));
     const existingSeasonPlayerIds = new Set(cardsWithAverage
       .filter((card) => card.season === seasonNumber)
       .map((card) => card.userId));
@@ -967,7 +1535,7 @@ export default function App() {
         if (card.season !== seasonNumber) return card;
         const total = voteTotals.get(card.userId);
         const score = total ? Math.round(total.sum / total.count) : card.score;
-        return { ...card, score, isCriminoso: false, tier: getSeasonCardTier(score, false, seasonNumber) };
+        return { ...card, score, isCriminoso: false, stats: { ...EMPTY_MATCH_STATS }, tier: getSeasonCardTier(score, false, seasonNumber) };
       }),
     ]));
     setUsers(seasonUsers.map((user) => ({
@@ -977,21 +1545,111 @@ export default function App() {
         : 0,
       totalVotes: recentVotes.filter((vote) => vote.targetUserId === user.id).length,
     })));
-    setActiveSeason({
-      number: activeSeason.number,
-      status: 'active',
-      startedAt: startedAt.toISOString(),
-      endsAt: new Date(startedAt.getTime() + 7 * 60 * 60 * 1000).toISOString(),
-    });
+    if (supabase) void Promise.allSettled(seasonUsers.map((user) => saveSharedPlayerMatchStats(user.id, EMPTY_MATCH_STATS)));
+    activeSeasonRef.current = nextSeason;
+    setActiveSeason(nextSeason);
     setSeasonEvent({ kind: 'start', season: seasonNumber, id: Date.now() });
+    publishNotifications(users.map((user) => ({
+      id: `season-start:${seasonNumber}:${user.id}`,
+      userId: user.id,
+      title: `Temporada ${seasonNumber} iniciada`,
+      message: 'A nova temporada do Personas começou. As avaliações já estão liberadas.',
+      type: 'system',
+      read: false,
+      createdAt: 'Agora',
+    })));
   };
 
-  const handleFinalizeSeason = useCallback((automatic = false) => {
-    if (activeSeason.status !== 'active' || (currentUser?.role !== 'criador' && !automatic) || (isImpersonating && !automatic)) return;
+  const handleResetAllSeasons = async () => {
+    if (currentUser?.role !== 'criador' || isImpersonating) {
+      throw new Error('Somente o Criador pode resetar todas as temporadas.');
+    }
+
+    const resetAt = Math.max(Date.now(), Number(sharedTournament.seasonResetAt || 0) + 1);
+    let resetTournament = normalizeSharedTournament({
+      updatedAt: resetAt,
+      seasonResetAt: resetAt,
+      attendanceSeason: 1,
+      tournamentStarted: false,
+      attendeeIds: [],
+      captainIds: ['', ''],
+        confirmedDeckCardId: null,
+        captainRerollRequest: null,
+        interClassDraw: null,
+      draftMode: 'random',
+      seriesFormat: 'MD3',
+      predefinedTeams: null,
+      captainDraftTurn: null,
+      playerPoolIds: [],
+      draftStage: 'setup',
+      teams: [],
+    });
+
+    if (supabase) {
+      const authorization = await getSupabaseAuthorizationHeaders();
+      const response = await fetch('/api/reset-seasons', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authorization },
+        body: JSON.stringify({}),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Não foi possível resetar as temporadas.');
+      }
+      if (payload?.tournamentState) {
+        resetTournament = normalizeSharedTournament(payload.tournamentState as Partial<SharedTournamentState>);
+      }
+    }
+
+    setSharedTournament(resetTournament);
+  };
+
+  const handleFinalizeSeason = useCallback(async (automatic = false) => {
+    if (activeSeason.status !== 'active' || currentUser?.role !== 'criador' || isImpersonating) return;
     const alreadyArchived = seasonArchives.some((archive) => archive.number === activeSeason.number);
     if (alreadyArchived) return;
 
+    const nextSeason: ActiveSeason = {
+      number: activeSeason.number + 1,
+      status: 'ready',
+      startedAt: null,
+      endsAt: null,
+    };
+    try {
+      await saveSharedSeasonControl(nextSeason);
+    } catch (error) {
+      if (!automatic) window.alert(error instanceof Error ? error.message : 'Não foi possível encerrar a temporada compartilhada.');
+      else console.warn('Não foi possível encerrar automaticamente a temporada compartilhada.', error);
+      return;
+    }
+
     const criminalId = selectSeasonCriminalId(users, recentVotes, activeSeason.number, sharedTournament.attendeeIds);
+    const endNotifications = users.flatMap((user): NotificationItem[] => {
+      const playerVotes = recentVotes.filter((vote) => vote.targetUserId === user.id && vote.season === activeSeason.number);
+      const items: NotificationItem[] = [{
+        id: `season-finish:${activeSeason.number}:${user.id}`,
+        userId: user.id,
+        title: `Temporada ${activeSeason.number} encerrada`,
+        message: 'A votação foi encerrada. Confira o resultado e o histórico da temporada.',
+        type: 'system',
+        read: false,
+        createdAt: 'Agora',
+      }];
+      if (playerVotes.length) {
+        const average = Math.round(playerVotes.reduce((sum, vote) => sum + vote.score, 0) / playerVotes.length);
+        items.push({
+          id: `season-card:${activeSeason.number}:${user.id}`,
+          userId: user.id,
+          title: 'Sua carta da temporada foi gerada',
+          message: `A carta da temporada ${activeSeason.number} foi criada com média ${average}. Veja-a na aba Cartas.`,
+          type: 'card',
+          read: false,
+          createdAt: 'Agora',
+        });
+      }
+      return items;
+    });
+    publishNotifications(endNotifications);
 
     const archive: SeasonArchive = {
       number: activeSeason.number,
@@ -1017,9 +1675,23 @@ export default function App() {
       }),
     };
 
+    const commentsToArchive: SeasonCommentArchive = {};
+    users.forEach((user) => {
+      user.comments.forEach((comment) => {
+        const commentSeason = getCommentSeason(user.id, comment, recentVotes, seasonArchives, activeSeason.number);
+        commentsToArchive[commentSeason] ||= {};
+        commentsToArchive[commentSeason][user.id] ||= [];
+        commentsToArchive[commentSeason][user.id].push({ ...comment, season: commentSeason });
+      });
+    });
+    if (Object.keys(commentsToArchive).length) {
+      setSeasonCommentArchive((previous) => mergeSeasonCommentArchive(previous, commentsToArchive));
+    }
+
     setSeasonArchives((previous) => [archive, ...previous.filter((item) => item.number !== archive.number)]);
     setUsers((previous) => previous.map((user) => ({
       ...user,
+      comments: [],
       isCriminoso: false,
       seasonsPlayed: user.seasonsPlayed + 1,
     })));
@@ -1033,16 +1705,35 @@ export default function App() {
       };
     }));
     setSeasonEvent({ kind: 'finish', season: activeSeason.number, automatic, id: Date.now() });
-    setActiveSeason({
-      number: activeSeason.number + 1,
-      status: 'ready',
-      startedAt: null,
-      endsAt: null,
+    setSharedTournament((previous) => {
+      const normalizedPrevious = normalizeSharedTournament(previous);
+      return normalizeSharedTournament({
+        ...normalizedPrevious,
+        updatedAt: Math.max(Date.now(), normalizedPrevious.updatedAt + 1),
+        attendanceSeason: nextSeason.number,
+        tournamentStarted: false,
+        attendeeIds: [],
+        captainIds: ['', ''],
+        predefinedTeams: null,
+        captainDraftTurn: null,
+        playerPoolIds: [],
+        draftStage: 'setup',
+        teams: [],
+      });
     });
-  }, [activeSeason, cardsWithAverage, currentUser?.role, isImpersonating, recentVotes, seasonArchives, sharedTournament.attendeeIds, users]);
+    activeSeasonRef.current = nextSeason;
+    setActiveSeason(nextSeason);
+  }, [activeSeason, cardsWithAverage, currentUser?.role, isImpersonating, publishNotifications, recentVotes, seasonArchives, sharedTournament.attendeeIds, users]);
 
-  const handleResetSeasonRatings = (targetUserId?: string) => {
+  const handleResetSeasonRatings = async (targetUserId?: string) => {
     if (!canAccessCreatorPanel) return;
+
+    try {
+      await deleteSharedSeasonVotes(activeSeason.number, targetUserId);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Não foi possível apagar as notas compartilhadas.');
+      return;
+    }
 
     const remainingVotes = recentVotes.filter((vote) =>
       vote.season !== activeSeason.number || (targetUserId && vote.targetUserId !== targetUserId)
@@ -1101,14 +1792,29 @@ export default function App() {
     setCurrentUser(null);
     setIsCreatorSession(false);
     setIsImpersonating(false);
+    setIsCaptainRolePreview(false);
     setProfileModalTarget(null);
     setReportModalTarget(null);
     setActiveTab('cards');
   };
 
   // Role testing simulator (Testar como é os cargos)
-  const handleTestRole = (role: UserRole) => {
+  const handleTestRole = (role: TestRole) => {
     if (!isCreatorSession) return;
+    if (role === 'capitão') {
+      const assignedCaptains = sharedTournament.captainIds.filter(Boolean);
+      const currentCaptainIndex = assignedCaptains.indexOf(currentRosterUserId || '');
+      const candidateId = assignedCaptains.length > 0
+        ? assignedCaptains[currentCaptainIndex >= 0 ? (currentCaptainIndex + 1) % assignedCaptains.length : 0]
+        : checkedInRosterIds[0] || users.find((user) => user.role === 'jogador')?.id;
+      const captainPreviewUser = users.find((user) => user.id === candidateId);
+      if (!captainPreviewUser) return;
+      setCurrentUser(captainPreviewUser);
+      setIsImpersonating(true);
+      setIsCaptainRolePreview(true);
+      return;
+    }
+    setIsCaptainRolePreview(false);
     if (role === 'visitante') {
       setCurrentUser(null);
       setIsImpersonating(false);
@@ -1124,13 +1830,14 @@ export default function App() {
   const handleImpersonateUser = (targetUser: User) => {
     setCurrentUser(targetUser);
     setIsImpersonating(true);
-    setActiveTab('cards');
+    setIsCaptainRolePreview(false);
   };
 
   const handleStopImpersonating = () => {
     setCurrentUser(creatorUser);
     setIsCreatorSession(true);
     setIsImpersonating(false);
+    setIsCaptainRolePreview(false);
   };
 
   const prepareUserUpdate = (updated: User) => {
@@ -1256,7 +1963,7 @@ export default function App() {
     return null;
   };
 
-  const handleAddCommunityPlayer = (player: { name: string; handle: string; email?: string; riotId: string; primaryLane: Lane }): string | null => {
+  const handleAddCommunityPlayer = (player: { name: string; handle: string; riotId: string; primaryLane: Lane }): string | null => {
     if (!canAccessCreatorPanel) return 'Somente o criador pode adicionar jogadores.';
 
     const handle = normalizeHandle(player.handle);
@@ -1268,7 +1975,6 @@ export default function App() {
       id: `user_${handleSlug}_${Date.now()}`,
       handle,
       name: player.name.trim(),
-      email: normalizeEmail(player.email) || undefined,
       role: 'jogador',
       isOnline: false,
       avatar: mascotAvatar,
@@ -1292,7 +1998,6 @@ export default function App() {
 
     setUsers((previous) => previous.some((user) =>
       normalizeHandle(user.handle) === handle ||
-      (newUser.email && normalizeEmail(user.email) === newUser.email) ||
       (newUser.riotId && normalizeRiotId(user.riotId) === normalizeRiotId(newUser.riotId))
     )
       ? previous
@@ -1300,33 +2005,82 @@ export default function App() {
     return null;
   };
 
-  // OCR replaces the selected player's latest match statistics; it never creates rating votes.
-  const handleApplyOcrMatchStats = async (data: {
+  const saveMatchStatsRecord = async (data: {
     userId: string;
-    playerName: string;
     stats: User['stats'];
-  }) => {
+    result: 'victory' | 'defeat';
+    imageFingerprint: string;
+  }): Promise<string | null> => {
     if (!canAccessCreatorPanel || currentUser?.role !== 'criador' || isImpersonating) {
-      throw new Error('Somente a conta do criador pode atualizar as estatísticas por print.');
+      return 'Somente a conta do criador pode atualizar as estatísticas da partida.';
     }
     const target = users.find((user) => user.id === data.userId);
-    if (!target) throw new Error('Não encontrei esse jogador no elenco. Atualize a página e tente novamente.');
+    if (!target) return 'Não encontrei esse jogador no elenco. Atualize a página e tente novamente.';
 
     const stats = normalizeStats(data.stats);
-    await saveSharedPlayerMatchStats(target.id, stats);
-    setUsers((previous) => previous.map((user) => user.id === target.id ? { ...user, stats } : user));
+    const record: MatchRecord = {
+      id: `match_${target.id}_${activeSeason.number}_${data.imageFingerprint}`,
+      playerId: target.id,
+      season: activeSeason.number,
+      result: data.result,
+      stats,
+      imageFingerprint: data.imageFingerprint,
+      createdAt: new Date().toISOString(),
+    };
+    const nextRecords = [
+      ...matchRecords.filter((item) => !(item.playerId === record.playerId
+        && item.season === record.season && item.imageFingerprint === record.imageFingerprint)),
+      record,
+    ];
+    const seasonAverage = averageMatchStats(nextRecords.filter((item) => item.playerId === target.id && item.season === activeSeason.number));
+    try {
+      await saveSharedPlayerMatchRecord({
+        playerId: record.playerId,
+        season: record.season,
+        result: record.result,
+        stats: record.stats,
+        imageFingerprint: record.imageFingerprint,
+      });
+      await saveSharedPlayerMatchStats(target.id, seasonAverage);
+    } catch (error) {
+      return error instanceof Error ? error.message : 'Não foi possível salvar as estatísticas da partida.';
+    }
+    setMatchRecords(nextRecords);
+    setUsers((previous) => previous.map((user) => user.id === target.id ? { ...user, stats: seasonAverage } : user));
     setCards((previous) => previous.map((card) =>
-      card.userId === target.id && card.season === activeSeason.number ? { ...card, stats } : card,
+      card.userId === target.id && card.season === activeSeason.number ? { ...card, stats: seasonAverage } : card,
     ));
-    setNotifications((previous) => [{
-      id: `notif_match_stats_${Date.now()}_${target.id}`,
+    publishNotifications([{
+      id: `match-stats:${record.season}:${record.playerId}:${record.imageFingerprint}`,
       userId: target.id,
-      title: 'Estatísticas da partida atualizadas',
+      title: data.result === 'victory' ? 'Vitória registrada na temporada' : 'Derrota registrada na temporada',
       message: `${formatKda(stats)} · ${stats.minions.toLocaleString('pt-BR')} minions · ${formatGold(stats.gold)} de ouro`,
       type: 'card',
       read: false,
       createdAt: 'Agora',
-    }, ...previous]);
+    }]);
+    return null;
+  };
+
+  // OCR and manual entries share the same seasonal match history and average calculation.
+  const handleApplyOcrMatchStats = async (data: {
+    userId: string;
+    playerName: string;
+    stats: User['stats'];
+    result: 'victory' | 'defeat';
+    imageFingerprint: string;
+  }) => {
+    const error = await saveMatchStatsRecord(data);
+    if (error) throw new Error(error);
+  };
+
+  const handleAddManualMatchStats = async (data: {
+    userId: string;
+    stats: User['stats'];
+    result: 'victory' | 'defeat';
+  }): Promise<string | null> => {
+    const imageFingerprint = `manual_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    return saveMatchStatsRecord({ ...data, imageFingerprint });
   };
 
   // Notes update the player's average, active-season card, and profile comments.
@@ -1334,15 +2088,25 @@ export default function App() {
     targetUserId: string;
     score: number;
     comment?: string;
-  }) => {
-    if (!currentUser || currentUser.id === voteData.targetUserId) return;
+  }): Promise<string | null> => {
+    return (async () => {
+    if (!currentUser) return 'Entre na sua conta para dar uma nota.';
+    if (currentUser.id === voteData.targetUserId && currentUser.role !== 'criador') return 'Você não pode avaliar o próprio perfil.';
+    const isLocalSimulationVote = isLocalPreview && isImpersonating;
+    if (isImpersonating && !isLocalSimulationVote) return 'Saia da conta assumida para registrar uma nota.';
+    if (activeSeason.status !== 'active') return 'A votação está fechada. Aguarde o criador abrir uma nova temporada.';
+    if (supabase && !isSharedVotingReady && !isLocalSimulationVote) return 'Aguarde a sincronização das notas antes de votar.';
+    if (recentVotes.some((vote) => (vote.fromUserId === currentUser.id || Boolean(currentUser.authId && vote.fromAuthUserId === currentUser.authId)) && vote.targetUserId === voteData.targetUserId && vote.season === activeSeason.number)) {
+      return 'Você já deu uma nota para este jogador nesta temporada.';
+    }
 
     const target = users.find((u) => u.id === voteData.targetUserId);
-    if (!target) return;
+    if (!target) return 'Não foi possível encontrar este jogador.';
+    if (!sharedTournament.attendeeIds.includes(target.id)) return 'Este jogador não confirmou presença nesta temporada.';
 
     const score = Math.max(0, Math.min(100, Math.round(voteData.score)));
-    const voteRecord: VoteRecord = {
-      id: `vote_${Date.now()}`,
+    let voteRecord: VoteRecord = {
+      id: `${isLocalSimulationVote ? 'local_sim_vote' : 'vote'}_${Date.now()}`,
       fromUserId: currentUser.id,
       fromUserName: currentUser.name,
       fromUserHandle: currentUser.handle,
@@ -1353,6 +2117,22 @@ export default function App() {
       season: activeSeason.number,
       createdAt: new Date().toISOString(),
     };
+    if (!isLocalSimulationVote) {
+      try {
+        const savedVote = await saveSharedSeasonVote(voteRecord);
+        if (supabase && !savedVote) return 'O serviço compartilhado de notas não está disponível.';
+        if (savedVote) {
+          voteRecord = savedVote;
+          pendingSharedVotesRef.current.set(savedVote.id, savedVote);
+        }
+      } catch (error) {
+        const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+        if (code === '23505') return 'Você já deu uma nota para este jogador nesta temporada.';
+        if (code === '42501') return 'A votação está fechada ou sua sessão expirou. Atualize a página e tente novamente.';
+        return error instanceof Error ? error.message : 'Não foi possível salvar sua nota compartilhada.';
+      }
+    }
+
     const targetSeasonVotes = recentVotes.filter((vote) => vote.targetUserId === target.id && vote.season === activeSeason.number);
     const newAverage = Math.round((targetSeasonVotes.reduce((sum, vote) => sum + vote.score, 0) + score) / (targetSeasonVotes.length + 1));
 
@@ -1361,6 +2141,7 @@ export default function App() {
     const newComment = commentText
       ? {
           id: `comm_${Date.now()}`,
+          season: activeSeason.number,
           authorId: currentUser.id,
           authorName: currentUser.name,
           authorHandle: currentUser.handle,
@@ -1413,24 +2194,26 @@ export default function App() {
 
     setRecentVotes((prev) => [...prev, voteRecord]);
 
-    setNotifications((prev) => [
-      {
-        id: `notif_${Date.now()}`,
-        userId: target.id,
-        title: 'Nova avaliação no seu perfil',
-        message: `${currentUser.name} publicou a nota ${score}.`,
+    if (!supabase || isLocalSimulationVote) {
+      publishNotifications([{
+        id: `vote:${voteRecord.id}`,
+        userId: creatorUser.id,
+        title: 'Nova nota recebida',
+        message: `${currentUser.name} avaliou ${target.name} com nota ${score} na temporada ${activeSeason.number}.`,
         type: 'vote',
         read: false,
         createdAt: 'Agora',
-      },
-      ...prev,
-    ]);
+      }]);
+    }
+    return null;
+    })();
   };
 
   const handleAddProfileComment = (targetUserId: string, text: string) => {
     if (!currentUser || currentUser.id === targetUserId || !text.trim()) return;
     const comment = {
       id: `comm_${Date.now()}`,
+      season: activeSeason.number,
       authorId: currentUser.id,
       authorName: currentUser.name,
       authorHandle: currentUser.handle,
@@ -1450,6 +2233,19 @@ export default function App() {
         ? { ...user, comments: (user.comments || []).filter((comment) => comment.id !== commentId) }
         : user
     ));
+    setSeasonCommentArchive((previous) => {
+      let changed = false;
+      const next = { ...previous };
+      Object.entries(previous).forEach(([seasonKey, usersForSeason]) => {
+        const archivedComments = usersForSeason[targetUserId];
+        if (!archivedComments?.some((comment) => comment.id === commentId)) return;
+        changed = true;
+        const updatedUsers = { ...usersForSeason };
+        updatedUsers[targetUserId] = archivedComments.filter((comment) => comment.id !== commentId);
+        next[Number(seasonKey)] = updatedUsers;
+      });
+      return changed ? next : previous;
+    });
   };
 
   const handleSubmitReport = (reportData: {
@@ -1476,18 +2272,15 @@ export default function App() {
 
     setReports((prev) => [newReport, ...prev]);
 
-    setNotifications((prev) => [
-      {
-        id: `notif_rep_${Date.now()}`,
-        userId: creatorUser.id,
-        title: '⚠️ Nova Denúncia Recebida!',
-        message: `${currentUser.name} denunciou ${target.name} por "${reportData.reason}".`,
-        type: 'report',
-        read: false,
-        createdAt: 'Agora',
-      },
-      ...prev,
-    ]);
+    publishNotifications([{
+      id: `notif_rep_${Date.now()}`,
+      userId: creatorUser.id,
+      title: '⚠️ Nova Denúncia Recebida!',
+      message: `${currentUser.name} denunciou ${target.name} por "${reportData.reason}".`,
+      type: 'report',
+      read: false,
+      createdAt: 'Agora',
+    }]);
   };
 
   const handleResolveReport = (reportId: string, status: 'resolvido' | 'descartado') => {
@@ -1513,18 +2306,15 @@ export default function App() {
     setChatMessages((prev) => [...prev, newMsg]);
 
     if (currentUser.id !== creatorUser.id) {
-      setNotifications((prev) => [
-        {
-          id: `notif_chat_${Date.now()}`,
-          userId: creatorUser.id,
-          title: `Nova mensagem de ${currentUser.name}`,
-          message: text.length > 50 ? text.substring(0, 50) + '...' : text,
-          type: 'system',
-          read: false,
-          createdAt: 'Agora',
-        },
-        ...prev,
-      ]);
+      publishNotifications([{
+        id: `notif_chat_${Date.now()}`,
+        userId: creatorUser.id,
+        title: `Nova mensagem de ${currentUser.name}`,
+        message: text.length > 50 ? text.substring(0, 50) + '...' : text,
+        type: 'system',
+        read: false,
+        createdAt: 'Agora',
+      }]);
     }
   };
 
@@ -1555,7 +2345,8 @@ export default function App() {
         }
       }
 
-      if (cardSeasonFilter !== 'all' && card.season !== Number(cardSeasonFilter)) return false;
+      if (cardSeasonFilter === 'current' && card.season !== activeSeason.number) return false;
+      if (cardSeasonFilter !== 'current' && cardSeasonFilter !== 'all' && card.season !== Number(cardSeasonFilter)) return false;
       if (cardLaneFilter !== 'all' && card.lane !== cardLaneFilter) return false;
       if (cardAwardFilter === 'mvp' && !card.isMvp) return false;
       if (cardAwardFilter === 'ace' && !card.isAce) return false;
@@ -1574,13 +2365,21 @@ export default function App() {
       return true;
     });
 
-  const usersWithRankedCards = new Set(cardsWithAverage.map((card) => card.userId));
+  const cardsInSelectedSeason = cardsWithAverage.filter((card) => (
+    cardSeasonFilter === 'all'
+      || (cardSeasonFilter === 'current' ? card.season === activeSeason.number : card.season === Number(cardSeasonFilter))
+  ));
+  const usersWithRankedCards = new Set(cardsInSelectedSeason.map((card) => card.userId));
   const checkedInUsersWithoutRankedCards = users
-    .filter((user) => sharedTournament.attendeeIds.includes(user.id))
+    .filter((user) => checkedInRosterIds.includes(user.id))
     .filter((user) => !usersWithRankedCards.has(user.id));
+  const checkedInPlayers = checkedInRosterIds.flatMap((userId) => {
+    const user = users.find((candidate) => candidate.id === userId);
+    return user ? [{ id: user.id, name: user.name }] : [];
+  });
   const usersWithoutRankedCards = checkedInUsersWithoutRankedCards
     .filter(() => cardTierFilter === 'all' && cardAwardFilter === 'all')
-    .filter(() => cardSeasonFilter === 'all' || Number(cardSeasonFilter) === activeSeason.number)
+    .filter(() => cardSeasonFilter === 'current' || cardSeasonFilter === 'all' || Number(cardSeasonFilter) === activeSeason.number)
     .filter((user) => cardLaneFilter === 'all' || user.primaryLane === cardLaneFilter)
     .filter((user) => {
       if (!cardSearchQuery.trim()) return true;
@@ -1606,18 +2405,15 @@ export default function App() {
         onOpenLoginModal={() => setIsLoginModalOpen(true)}
         onOpenProfileModal={() => setProfileModalTarget(currentUser)}
         onLogout={handleLogout}
-        notifications={notifications}
-        onMarkNotificationRead={(id) =>
-          setNotifications((prev) =>
-            prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-          )
-        }
-        onDeleteNotification={(id) => setNotifications((prev) => prev.filter((n) => n.id !== id))}
-        onMarkAllNotificationsRead={() => setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))}
+        notifications={visibleNotifications}
+        onMarkNotificationRead={handleMarkNotificationRead}
+        onDeleteNotification={handleDeleteNotification}
+        onMarkAllNotificationsRead={handleMarkAllNotificationsRead}
         theme={theme}
         onToggleTheme={handleToggleTheme}
         onTestRole={handleTestRole}
         canTestRoles={isCreatorSession}
+        isCaptainPreview={isCaptainRolePreview}
       />
 
       {/* Main Container */}
@@ -1685,10 +2481,11 @@ export default function App() {
               activeSeason={activeSeason}
               canManageSeason={currentUser?.role === 'criador' && !isImpersonating}
               checkInOpen={activeSeason.status !== 'active' && !sharedTournament.tournamentStarted}
-              isCheckedIn={Boolean(currentUser && sharedTournament.attendeeIds.includes(currentUser.id))}
-              checkInCount={sharedTournament.attendeeIds.length}
-              checkInDisabled={!isSharedTournamentReady}
-              onCheckIn={handleToggleTournamentAttendance}
+              isCheckedIn={Boolean(currentRosterUserId && checkedInRosterIds.includes(currentRosterUserId))}
+              checkInCount={checkedInRosterIds.length}
+              checkedInPlayers={checkedInPlayers}
+              checkInDisabled={isCheckInSaving || !isSharedTournamentReady || (sharedTournament.attendanceSeason !== undefined && sharedTournament.attendanceSeason !== activeSeason.number)}
+              onCheckIn={() => handleToggleTournamentAttendance()}
               onStart={handleStartSeason}
               onFinish={() => handleFinalizeSeason(false)}
             />
@@ -1729,9 +2526,12 @@ export default function App() {
 
               <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 md:w-auto">
                 <label className="sr-only" htmlFor="card-season-filter">Filtrar por temporada</label>
-                <select id="card-season-filter" value={cardSeasonFilter} onChange={(event) => setCardSeasonFilter(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-900 px-2.5 py-2 text-xs text-slate-200 focus:border-amber-500 focus:outline-none">
+                <select id="card-season-filter" value={cardSeasonFilter === 'current' ? String(activeSeason.number) : cardSeasonFilter} onChange={(event) => {
+                  const nextFilter = event.target.value;
+                  setCardSeasonFilter(nextFilter === String(activeSeason.number) ? 'current' : nextFilter);
+                }} className="rounded-xl border border-slate-700 bg-slate-900 px-2.5 py-2 text-xs text-slate-200 focus:border-amber-500 focus:outline-none">
                   <option value="all">Todas as temporadas</option>
-                  {[...new Set(cardsWithAverage.map((card) => card.season))].sort((a, b) => b - a).map((season) => <option key={season} value={season}>Temporada {season}</option>)}
+                  {[...new Set([...cardsWithAverage.map((card) => card.season), activeSeason.number])].sort((a, b) => b - a).map((season) => <option key={season} value={season}>Temporada {season}</option>)}
                 </select>
                 <label className="sr-only" htmlFor="card-lane-filter">Filtrar por rota</label>
                 <select id="card-lane-filter" value={cardLaneFilter} onChange={(event) => setCardLaneFilter(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-900 px-2.5 py-2 text-xs text-slate-200 focus:border-amber-500 focus:outline-none">
@@ -1767,7 +2567,7 @@ export default function App() {
                       userName: targetUser.name,
                       userHandle: targetUser.handle,
                       userAvatar: targetUser.avatar,
-                      stats: targetUser.stats,
+                      stats: card.season === activeSeason.number ? targetUser.stats : card.stats,
                       lane: targetUser.primaryLane,
                       favoriteChampion: targetUser.favoriteChampion,
                     } : card;
@@ -1818,22 +2618,67 @@ export default function App() {
           <CardRoulette
             deck={deck}
             currentUser={currentUser}
-            isCaptain={Boolean(currentUser && (currentUser.role === 'capitao' || sharedTournament.captainIds.includes(currentUser.id)))}
+            isCaptain={isCaptainRolePreview || Boolean(currentUser && currentRosterUserId && checkedInRosterIds.includes(currentRosterUserId) && sharedTournament.captainIds.includes(currentRosterUserId))}
+            currentUserRosterId={currentRosterUserId}
+            captainIds={sharedTournament.captainIds}
             canEditCards={canAccessCreatorPanel}
+            confirmedDeckCardId={sharedTournament.confirmedDeckCardId || null}
+            captainRerollRequest={sharedTournament.captainRerollRequest || null}
+            interClassDraw={sharedTournament.interClassDraw || null}
             onUpdateDeck={setDeck}
             onConfirmCard={(card) => {
-              setNotifications((prev) => [
-                {
-                  id: `notif_card_${Date.now()}`,
-                  userId: creatorUser.id,
-                  title: 'Carta Confirmada para a Partida',
-                  message: `A regra "${card.title}" está valendo no Rift!`,
-                  type: 'card',
-                  read: false,
-                  createdAt: 'Agora',
-                },
-                ...prev,
-              ]);
+              const wasAlreadyConfirmed = sharedTournament.confirmedDeckCardId === card.id;
+              updateSharedTournament((previous) => ({
+                confirmedDeckCardId: card.id,
+                interClassDraw: previous.interClassDraw?.cardId === card.id ? previous.interClassDraw : null,
+              }));
+              if (wasAlreadyConfirmed) return;
+              publishNotifications([{
+                id: `notif_card_${Date.now()}`,
+                userId: creatorUser.id,
+                title: 'Carta Confirmada para a Partida',
+                message: `A regra "${card.title}" está valendo no Rift!`,
+                type: 'card',
+                read: false,
+                createdAt: 'Agora',
+              }]);
+            }}
+            onCaptainRerollRequest={(request) => {
+              if (!currentRosterUserId || !sharedTournament.confirmedDeckCardId
+                || !sharedTournament.captainIds.includes(currentRosterUserId)
+                || !request.opponentId || request.opponentId === currentRosterUserId) return;
+              updateSharedTournament({ captainRerollRequest: request });
+            }}
+            onRespondToCaptainReroll={(accepted) => {
+              const request = sharedTournament.captainRerollRequest;
+              if (!request || request.status !== 'waiting_opponent' || request.opponentId !== currentRosterUserId) return;
+              updateSharedTournament({
+                captainRerollRequest: accepted
+                  ? { ...request, status: 'waiting_creator', acceptedBy: currentRosterUserId || '', acceptedByName: currentUser?.name || 'Capitão' }
+                  : null,
+              });
+            }}
+            onApproveCaptainReroll={(card) => {
+              if (!canAccessCreatorPanel || sharedTournament.captainRerollRequest?.status !== 'waiting_creator') return;
+              updateSharedTournament({
+                confirmedDeckCardId: card.id,
+                captainRerollRequest: null,
+                interClassDraw: null,
+              });
+              publishNotifications(users.filter((user) => sharedTournament.attendeeIds.includes(user.id)).map((user) => ({
+                id: `reroll-card:${card.id}:${Date.now()}:${user.id}`,
+                userId: user.id,
+                title: 'A carta da partida mudou',
+                message: `O Criador confirmou a carta ${card.title} após o pedido conjunto dos capitães.`,
+                type: 'card' as const,
+                read: false,
+                createdAt: 'Agora',
+              })));
+            }}
+            onDrawInterClass={(card, blueClass, redClass) => {
+              if (!canAccessCreatorPanel || sharedTournament.confirmedDeckCardId !== card.id
+                || card.title.trim().toLocaleLowerCase('pt-BR') !== 'inter classe' || blueClass === redClass) return;
+              updateSharedTournament({ interClassDraw: { cardId: card.id, blueClass, redClass, drawnAt: Date.now() } });
             }}
           />
         )}
@@ -1866,8 +2711,12 @@ export default function App() {
             currentUser={currentUser}
             recentVotes={recentVotes}
             activeSeasonNumber={activeSeason.number}
-            attendeeIds={sharedTournament.attendeeIds}
-            canManageAttendance={Boolean(canAccessCreatorPanel && activeSeason.status !== 'active' && !sharedTournament.tournamentStarted && isSharedTournamentReady)}
+            activeSeasonStatus={activeSeason.status}
+            canVoteInSeason={canCurrentUserVoteInSeason}
+            voteDisabledReason={voteDisabledReason}
+            canViewRecentActivity={canAccessCreatorPanel}
+            attendeeIds={checkedInRosterIds}
+            canManageAttendance={Boolean(canAccessCreatorPanel && activeSeason.status !== 'active' && !sharedTournament.tournamentStarted && isSharedTournamentReady && (sharedTournament.attendanceSeason === undefined || sharedTournament.attendanceSeason === activeSeason.number))}
             canManagePlayers={canAccessCreatorPanel}
             canResetRatings={canAccessCreatorPanel}
             onToggleAttendance={handleToggleTournamentAttendance}
@@ -1875,6 +2724,8 @@ export default function App() {
             onResetSeasonRatings={() => handleResetSeasonRatings()}
             onAddPlayer={handleAddCommunityPlayer}
             onOpenProfile={setProfileModalTarget}
+            onRequestLogin={() => setIsLoginModalOpen(true)}
+            onCastVote={handleCastVote}
           />
         )}
 
@@ -1883,10 +2734,14 @@ export default function App() {
             users={users}
             cards={cardsWithAverage}
             votes={recentVotes}
+            matchRecords={matchRecords}
             activeSeason={activeSeason}
             seasonArchives={seasonArchives}
             onOpenProfile={setProfileModalTarget}
-            onOpenOcr={() => setIsOcrModalOpen(true)}
+            canImportOcr={canAccessCreatorPanel}
+            onOpenOcr={() => {
+              if (canAccessCreatorPanel) setIsOcrModalOpen(true);
+            }}
           />
         )}
 
@@ -1903,8 +2758,10 @@ export default function App() {
             users={creatorPanelUsers}
             votes={recentVotes}
             captainIds={sharedTournament.captainIds}
-            attendeeIds={sharedTournament.attendeeIds}
+            attendeeIds={checkedInRosterIds}
             tournamentStarted={sharedTournament.tournamentStarted}
+            canManageAttendance={Boolean(activeSeason.status !== 'active' && !sharedTournament.tournamentStarted && isSharedTournamentReady && (sharedTournament.attendanceSeason === undefined || sharedTournament.attendanceSeason === activeSeason.number))}
+            onToggleAttendance={handleToggleTournamentAttendance}
             onSetTeamCaptain={handleSetTeamCaptain}
             cards={cardsWithAverage}
             deck={deck}
@@ -1917,11 +2774,14 @@ export default function App() {
             onUpdateDeck={setDeck}
             onUpdateCards={setCards}
             onResolveReport={handleResolveReport}
-            onOpenOcrModal={() => setIsOcrModalOpen(true)}
+            onOpenOcrModal={() => {
+              if (canAccessCreatorPanel) setIsOcrModalOpen(true);
+            }}
             onTestRole={handleTestRole}
             currentSeason={activeSeason.number}
             ornamentSettingsByTier={tierOrnamentSettings}
             onUpdateTierOrnamentSettings={handleUpdateTierOrnamentSettings}
+            onResetAllSeasons={handleResetAllSeasons}
           />
         )}
       </main>
@@ -1936,7 +2796,7 @@ export default function App() {
 
       {/* OCR Screenshot Parser Modal */}
       <OcrParserModal
-        isOpen={isOcrModalOpen}
+        isOpen={isOcrModalOpen && canAccessCreatorPanel}
         onClose={() => setIsOcrModalOpen(false)}
         users={users}
         onApplyMatchStats={handleApplyOcrMatchStats}
@@ -1951,6 +2811,9 @@ export default function App() {
           user={users.find((user) => user.id === profileModalTarget.id) || profileModalTarget}
           votes={recentVotes}
           activeSeasonNumber={activeSeason.number}
+          canRateInSeason={Boolean(canCurrentUserVoteInSeason && (currentUser?.id !== profileModalTarget.id || currentUser?.role === 'criador'))}
+          voteDisabledReason={voteDisabledReason}
+          hasRatedInSeason={Boolean(currentUser && recentVotes.some((vote) => (vote.fromUserId === currentUser.id || Boolean(currentUser.authId && vote.fromAuthUserId === currentUser.authId)) && vote.targetUserId === profileModalTarget.id && vote.season === activeSeason.number))}
           ornamentSettingsByTier={tierOrnamentSettings}
           allCards={cardsWithAverage.map((card) => {
             const cardUser = users.find((user) => user.id === card.userId);
@@ -1959,12 +2822,16 @@ export default function App() {
               userName: cardUser.name,
               userHandle: cardUser.handle,
               userAvatar: cardUser.avatar,
-              stats: cardUser.stats,
+              stats: card.season === activeSeason.number ? cardUser.stats : card.stats,
               lane: cardUser.primaryLane,
             } : card;
           })}
           seasonArchives={seasonArchives}
+          archivedCommentsBySeason={Object.fromEntries(Object.entries(seasonCommentArchive).map(([season, commentsByUser]) => [Number(season), commentsByUser[profileModalTarget.id] || []]))}
           currentUser={currentUser}
+          matchRecords={matchRecords}
+          canManageMatchStats={Boolean(canAccessCreatorPanel && currentUser?.role === 'criador' && !isImpersonating)}
+          onAddManualMatchStats={handleAddManualMatchStats}
           canImpersonateUser={canAccessCreatorPanel}
           canResetRatings={canAccessCreatorPanel}
           onImpersonateUser={handleImpersonateUser}

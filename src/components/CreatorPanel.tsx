@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { User, CardItem, CardOrnamentSettings, MatchDeckCard, ReportItem, ChatMessage, UserRole, EloTier, Lane, VoteRecord } from '../types';
+import { createPortal } from 'react-dom';
+import { User, UserRole, CardItem, CardOrnamentSettings, MatchDeckCard, ReportItem, ChatMessage, TestRole, EloTier, Lane, VoteRecord } from '../types';
 import { BackgroundImageField } from './BackgroundImageField';
 import { CardOrnamentEditor } from './CardOrnamentEditor';
 import { DEFAULT_CARD_ORNAMENT_SETTINGS, TierCardOrnamentSettings } from '../utils/cardOrnament';
@@ -19,6 +20,12 @@ import {
   ShieldCheck,
   Calendar,
   Scaling,
+  Flag,
+  Trash2,
+  EyeOff,
+  ImagePlus,
+  X,
+  RotateCcw,
 } from 'lucide-react';
 
 const ROUTE_CATEGORIES: { lane: Lane; label: string; color: string }[] = [
@@ -36,6 +43,8 @@ interface CreatorPanelProps {
   captainIds: [string, string];
   attendeeIds: string[];
   tournamentStarted: boolean;
+  canManageAttendance: boolean;
+  onToggleAttendance: (userId: string) => void;
   onSetTeamCaptain: (userId: string, slot: 0 | 1 | null) => void;
   cards: CardItem[];
   deck: MatchDeckCard[];
@@ -49,10 +58,11 @@ interface CreatorPanelProps {
   onUpdateCards: (updatedCards: CardItem[]) => void;
   onResolveReport: (reportId: string, status: 'resolvido' | 'descartado') => void;
   onOpenOcrModal: () => void;
-  onTestRole: (role: UserRole) => void;
+  onTestRole: (role: TestRole) => void;
   currentSeason: number;
   ornamentSettingsByTier: TierCardOrnamentSettings;
   onUpdateTierOrnamentSettings: (tier: EloTier, settings: CardOrnamentSettings) => void | Promise<void>;
+  onResetAllSeasons: () => Promise<void>;
 }
 
 export const CreatorPanel: React.FC<CreatorPanelProps> = ({
@@ -61,6 +71,8 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
   captainIds,
   attendeeIds,
   tournamentStarted,
+  canManageAttendance,
+  onToggleAttendance,
   onSetTeamCaptain,
   cards,
   deck,
@@ -78,11 +90,18 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
   currentSeason,
   ornamentSettingsByTier,
   onUpdateTierOrnamentSettings,
+  onResetAllSeasons,
 }) => {
   const [activeTab, setActiveTab] = useState<'players' | 'stats' | 'deck' | 'reports' | 'chat' | 'ornament'>('players');
+  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
+  const [isResettingSeasons, setIsResettingSeasons] = useState(false);
+  const [resetSeasonsError, setResetSeasonsError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editingUserError, setEditingUserError] = useState<string | null>(null);
+  const [editingDeckCard, setEditingDeckCard] = useState<MatchDeckCard | null>(null);
+  const [editingDeckImage, setEditingDeckImage] = useState<MatchDeckCard | null>(null);
+  const [draftDeckImage, setDraftDeckImage] = useState<string | undefined>();
 
   const filteredUsers = users.filter(
     (u) =>
@@ -112,8 +131,63 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
     setEditingUserError(null);
   };
 
-  const updateDeckCardBackground = (cardId: string, backgroundImage?: string) => {
-    onUpdateDeck(deck.map((card) => card.id === cardId ? { ...card, backgroundImage } : card));
+  const handleConfirmResetSeasons = async () => {
+    setIsResettingSeasons(true);
+    setResetSeasonsError(null);
+    try {
+      await onResetAllSeasons();
+      setIsResetConfirmOpen(false);
+    } catch (error) {
+      setResetSeasonsError(error instanceof Error ? error.message : 'Não foi possível resetar as temporadas.');
+    } finally {
+      setIsResettingSeasons(false);
+    }
+  };
+
+  const saveDeckCard = () => {
+    if (!editingDeckCard || !editingDeckCard.title.trim() || !editingDeckCard.rule.trim()) return;
+    onUpdateDeck(deck.map((card) => card.id === editingDeckCard.id ? {
+      ...editingDeckCard,
+      title: editingDeckCard.title.trim(),
+      rule: editingDeckCard.rule.trim(),
+      description: (editingDeckCard.description || '').trim(),
+      tags: Array.isArray(editingDeckCard.tags) ? editingDeckCard.tags : [],
+    } : card));
+    setEditingDeckCard(null);
+  };
+
+  const openDeckImageEditor = (card: MatchDeckCard) => {
+    setEditingDeckImage(card);
+    setDraftDeckImage(card.backgroundImage);
+  };
+
+  const saveDeckCardImage = () => {
+    if (!editingDeckImage) return;
+    onUpdateDeck(deck.map((card) => card.id === editingDeckImage.id ? { ...card, backgroundImage: draftDeckImage } : card));
+    setEditingDeckImage(null);
+    setDraftDeckImage(undefined);
+  };
+
+  const closeDeckImageEditor = () => {
+    setEditingDeckImage(null);
+    setDraftDeckImage(undefined);
+  };
+
+  const startEditingDeckCard = (card: MatchDeckCard) => {
+    setEditingDeckCard({
+      ...card,
+      description: card.description || '',
+      tags: Array.isArray(card.tags) ? [...card.tags] : [],
+    });
+  };
+
+  const toggleDeckCard = (cardId: string) => {
+    onUpdateDeck(deck.map((card) => card.id === cardId ? { ...card, isActive: card.isActive === false } : card));
+  };
+
+  const deleteDeckCard = (card: MatchDeckCard) => {
+    if (!window.confirm(`Excluir a carta “${card.title}” do baralho?`)) return;
+    onUpdateDeck(deck.filter((item) => item.id !== card.id));
   };
 
   // Generate 3 Legends based on top 3 scores
@@ -194,7 +268,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5">
-          {(['criador', 'moderador', 'capitao', 'jogador', 'visitante'] as UserRole[]).map((r) => (
+          {(['criador', 'jogador', 'capitão', 'visitante'] as TestRole[]).map((r) => (
             <button
               key={r}
               onClick={() => onTestRole(r)}
@@ -238,6 +312,14 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
             </button>
           );
         })}
+        <button
+          type="button"
+          onClick={() => { setResetSeasonsError(null); setIsResetConfirmOpen(true); }}
+          className="ml-auto flex items-center gap-2 rounded-xl border border-red-700/70 bg-red-950/30 px-4 py-2 text-xs font-bold text-red-200 transition hover:border-red-500 hover:bg-red-950/60"
+        >
+          <RotateCcw className="h-4 w-4" />
+          Resetar temporadas
+        </button>
       </div>
 
       {/* TAB 1: GERENCIAR JOGADORES (com Data de Entrada) */}
@@ -355,6 +437,22 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
 
                     <td className="py-3 px-3 text-right">
                       <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => onToggleAttendance(u.id)}
+                          disabled={!canManageAttendance}
+                          aria-pressed={hasAttendance}
+                          aria-label={hasAttendance ? `Cancelar check-in de ${u.name}` : `Fazer check-in de ${u.name}`}
+                          title={!canManageAttendance
+                            ? 'O check-in está fechado nesta etapa'
+                            : hasAttendance ? `Cancelar check-in de ${u.name}` : `Confirmar check-in de ${u.name}`}
+                          className={`inline-flex min-h-8 shrink-0 items-center gap-1 rounded px-2 py-1 text-[10px] font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${hasAttendance
+                            ? 'bg-emerald-950/60 text-emerald-200 hover:bg-red-950/60 hover:text-red-200'
+                            : 'bg-amber-950/60 text-amber-200 hover:bg-amber-900/70'}`}
+                        >
+                          {hasAttendance ? <CheckCircle className="h-3.5 w-3.5" /> : <Flag className="h-3.5 w-3.5" />}
+                          {hasAttendance ? 'Presente' : 'Check-in'}
+                        </button>
                         <button
                           onClick={() => onOpenProfile(u)}
                           className="inline-flex items-center gap-1 rounded bg-sky-950/70 px-2 py-1 text-[11px] font-bold text-sky-200 transition-colors hover:bg-sky-900"
@@ -501,42 +599,65 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
           <div className="pb-3 border-b border-slate-800">
             <div>
               <h3 className="font-display font-bold text-base text-white">
-                Fotos das Cartas de Sorteio
+                Cartas de Sorteio
               </h3>
               <p className="text-xs text-slate-400">
-                Adicione, troque ou remova a foto de fundo. Os textos e as regras das cartas ficam preservados.
+                Edite o texto ou o estado de cada carta do baralho.
               </p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {deck.map((card) => (
-              <article key={card.id} className="overflow-hidden rounded-xl border border-slate-800 bg-slate-900/60">
-                <div className="relative min-h-36 overflow-hidden bg-slate-950 p-4">
-                {card.backgroundImage && (
-                    <img src={card.backgroundImage} alt="" aria-hidden="true" className="absolute inset-0 h-full w-full object-cover opacity-45" />
-                )}
-                  <div className="absolute inset-0 bg-gradient-to-b from-slate-950/45 via-slate-950/65 to-slate-950/90" />
-                  <div className="relative z-10">
-                    <span className="text-sm font-bold text-white">{card.title}</span>
+              <article key={card.id} className={`overflow-hidden rounded-xl border bg-slate-900/60 ${card.isActive === false ? 'border-slate-800 opacity-60' : 'border-slate-800'}`}>
+                <div className="min-h-36 bg-gradient-to-b from-slate-900 to-slate-950 p-4">
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-sm font-bold text-white">{card.title}</span>
+                      <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase ${card.isActive === false ? 'border-slate-700 bg-slate-950/80 text-slate-400' : 'border-emerald-700/50 bg-emerald-950/70 text-emerald-300'}`}>{card.isActive === false ? 'Desativada' : 'Ativa'}</span>
+                    </div>
+                    {card.backgroundImage && (
+                      <div className="mt-3 flex max-h-32 w-full items-center justify-center overflow-hidden rounded-lg border border-slate-800 bg-black/60">
+                        <img src={card.backgroundImage} alt={`Imagem da carta ${card.title}`} className="block max-h-32 w-full object-contain" />
+                      </div>
+                    )}
                     <p className="mt-2 text-xs font-semibold text-amber-200">{card.rule}</p>
                     <p className="mt-1 text-[11px] italic text-slate-300">{card.description}</p>
                   </div>
                 </div>
                 <div className="p-3">
-                  <details className="group">
-                    <summary className="flex cursor-pointer list-none items-center justify-between rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs font-bold text-amber-200 transition hover:border-amber-500/60">
-                      <span>{card.backgroundImage ? 'Editar foto' : 'Adicionar foto'}</span>
-                      <span aria-hidden="true" className="text-slate-500 transition group-open:rotate-180">⌄</span>
-                    </summary>
-                    <div className="mt-3 rounded-lg border border-slate-800 bg-slate-950/70 p-3">
-                      <BackgroundImageField
-                        label="Foto de fundo da carta"
-                        value={card.backgroundImage}
-                        onChange={(backgroundImage) => updateDeckCardBackground(card.id, backgroundImage)}
-                      />
-                    </div>
-                  </details>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => openDeckImageEditor(card)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-[11px] font-bold text-amber-200 hover:border-amber-500">
+                      <ImagePlus className="h-3.5 w-3.5" /> {card.backgroundImage ? 'Editar foto' : 'Adicionar foto'}
+                    </button>
+                    <button type="button" onClick={() => startEditingDeckCard(card)} className="inline-flex items-center gap-1.5 rounded-lg border border-sky-800/60 bg-sky-950/40 px-3 py-2 text-[11px] font-bold text-sky-200 hover:border-sky-500">
+                      <Edit3 className="h-3.5 w-3.5" /> Editar carta
+                    </button>
+                    <button type="button" onClick={() => toggleDeckCard(card.id)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-[11px] font-bold text-amber-200 hover:border-amber-500">
+                      {card.isActive === false ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                      {card.isActive === false ? 'Ativar carta' : 'Desativar carta'}
+                    </button>
+                    <button type="button" onClick={() => deleteDeckCard(card)} className="inline-flex items-center gap-1.5 rounded-lg border border-red-800/60 bg-red-950/30 px-3 py-2 text-[11px] font-bold text-red-200 hover:border-red-500">
+                      <Trash2 className="h-3.5 w-3.5" /> Excluir carta
+                    </button>
+                  </div>
+                  {editingDeckCard?.id === card.id && (
+                    <section aria-label={`Editar ${card.title}`} className="mt-3 space-y-3 rounded-xl border border-sky-800/60 bg-slate-950 p-3 text-xs">
+                      <label className="block font-semibold text-slate-300">Título
+                        <input value={editingDeckCard.title} onChange={(event) => setEditingDeckCard({ ...editingDeckCard, title: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white" />
+                      </label>
+                      <label className="block font-semibold text-slate-300">Regra
+                        <textarea rows={3} value={editingDeckCard.rule} onChange={(event) => setEditingDeckCard({ ...editingDeckCard, rule: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white" />
+                      </label>
+                      <label className="block font-semibold text-slate-300">Descrição
+                        <textarea rows={2} value={editingDeckCard.description} onChange={(event) => setEditingDeckCard({ ...editingDeckCard, description: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-white" />
+                      </label>
+                      <div className="flex justify-end gap-2">
+                        <button type="button" onClick={() => setEditingDeckCard(null)} className="rounded-lg bg-slate-800 px-3 py-2 text-xs text-slate-300">Cancelar</button>
+                        <button type="button" onClick={saveDeckCard} disabled={!editingDeckCard.title.trim() || !editingDeckCard.rule.trim()} className="rounded-lg bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-50">Salvar alterações</button>
+                      </div>
+                    </section>
+                  )}
                 </div>
               </article>
             ))}
@@ -679,6 +800,49 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
         />
       )}
 
+      {/* Modal: Edit card image */}
+      {editingDeckImage && createPortal(
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={closeDeckImageEditor}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Editar foto da carta ${editingDeckImage.title}`}
+            className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-amber-700/50 bg-slate-950 shadow-2xl shadow-black/60"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="flex items-start justify-between gap-4 border-b border-slate-800 bg-gradient-to-r from-amber-950/40 to-slate-950 p-5">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300">Imagem da carta</p>
+                <h3 className="mt-1 font-display text-lg font-bold text-white">{editingDeckImage.title}</h3>
+                <p className="mt-1 text-xs text-slate-400">Adicione ou substitua a imagem ou GIF desta carta.</p>
+              </div>
+              <button type="button" onClick={closeDeckImageEditor} aria-label="Fechar editor da imagem" className="rounded-lg p-2 text-slate-400 transition hover:bg-slate-800 hover:text-white">
+                <X className="h-4 w-4" />
+              </button>
+            </header>
+            <div className="space-y-4 p-5">
+              <BackgroundImageField
+                label="Foto ou GIF da frente"
+                value={draftDeckImage}
+                onChange={setDraftDeckImage}
+              />
+              <div className="flex justify-end gap-2 border-t border-slate-800 pt-4">
+                <button type="button" onClick={closeDeckImageEditor} className="rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 transition hover:bg-slate-700">
+                  Cancelar
+                </button>
+                <button type="button" onClick={saveDeckCardImage} className="rounded-lg bg-amber-500 px-4 py-2 text-xs font-bold text-slate-950 transition hover:bg-amber-400">
+                  Salvar foto
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>,
+        document.body
+      )}
+
       {/* Modal: Edit User */}
       {editingUser && (
         <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4">
@@ -708,18 +872,7 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-slate-400 block mb-1">E-mail de login (privado):</label>
-                  <input
-                    type="email"
-                    value={editingUser.email || ''}
-                    onChange={(e) => { setEditingUser({ ...editingUser, email: e.target.value }); setEditingUserError(null); }}
-                    placeholder="jogador@exemplo.com"
-                    className="w-full p-2 rounded bg-slate-950 border border-slate-700 text-white"
-                  />
-                </div>
-                <div>
+              <div>
                   <label className="text-slate-400 block mb-1">Riot ID único:</label>
                   <input
                     type="text"
@@ -728,7 +881,6 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                     placeholder="Nick#BR1"
                     className="w-full p-2 rounded bg-slate-950 border border-slate-700 text-white font-mono"
                   />
-                </div>
               </div>
 
               <div>
@@ -752,8 +904,6 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
                     className="w-full p-2 rounded bg-slate-950 border border-slate-700 text-white"
                   >
                     <option value="criador">Criador</option>
-                    <option value="moderador">Moderador</option>
-                    <option value="capitao">Capitão</option>
                     <option value="jogador">Jogador</option>
                   </select>
                 </div>
@@ -815,6 +965,51 @@ export const CreatorPanel: React.FC<CreatorPanelProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {isResetConfirmOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => { if (event.target === event.currentTarget && !isResettingSeasons) setIsResetConfirmOpen(false); }}
+        >
+          <section role="alertdialog" aria-modal="true" aria-labelledby="reset-seasons-title" className="w-full max-w-lg rounded-2xl border border-red-700/70 bg-slate-950 p-6 shadow-2xl shadow-black/60">
+            <header className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <span className="rounded-xl border border-red-500/40 bg-red-950/60 p-2 text-red-300">
+                  <AlertOctagon className="h-5 w-5" />
+                </span>
+                <div>
+                  <h3 id="reset-seasons-title" className="font-display text-lg font-bold text-white">Resetar todas as temporadas?</h3>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-400">Esta ação apagará os dados competitivos salvos e voltará o site para a Temporada 1.</p>
+                </div>
+              </div>
+              <button type="button" disabled={isResettingSeasons} onClick={() => setIsResetConfirmOpen(false)} aria-label="Fechar confirmação" className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-white disabled:opacity-50">
+                <X className="h-4 w-4" />
+              </button>
+            </header>
+
+            <ul className="mt-5 space-y-2 rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-xs text-slate-300">
+              <li>• Apaga votos, médias e temporadas salvas.</li>
+              <li>• Apaga estatísticas e histórico de partidas: KDA, minions e ouro.</li>
+              <li>• Apaga comentários e cartas geradas das temporadas.</li>
+              <li>• Limpa check-ins, capitães e equipes do torneio.</li>
+            </ul>
+            <p className="mt-3 text-[11px] text-slate-500">As contas dos jogadores e as configurações gerais do site serão mantidas.</p>
+
+            {resetSeasonsError && <p role="alert" className="mt-4 rounded-lg border border-red-700/50 bg-red-950/40 p-3 text-xs text-red-200">{resetSeasonsError}</p>}
+
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button type="button" disabled={isResettingSeasons} onClick={() => setIsResetConfirmOpen(false)} className="rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-xs font-bold text-slate-300 transition hover:bg-slate-800 disabled:opacity-50">
+                Cancelar
+              </button>
+              <button type="button" disabled={isResettingSeasons} onClick={() => void handleConfirmResetSeasons()} className="flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-red-500 disabled:cursor-wait disabled:opacity-60">
+                <RotateCcw className={`h-4 w-4 ${isResettingSeasons ? 'animate-spin' : ''}`} />
+                {isResettingSeasons ? 'Resetando...' : 'Confirmar reset'}
+              </button>
+            </div>
+          </section>
+        </div>,
+        document.body,
       )}
 
     </div>

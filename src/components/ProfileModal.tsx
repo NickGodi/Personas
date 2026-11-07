@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { User, CardItem, Lane, SeasonArchive, EloTier, VoteRecord } from '../types';
+import { User, CardItem, Lane, SeasonArchive, EloTier, VoteRecord, MatchRecord, MatchResult, UserStats, PlayerComment } from '../types';
 import { getTierFromScore } from '../data/initialData';
 import { RankedCard } from './RankedCard';
 import { TierCardOrnamentSettings } from '../utils/cardOrnament';
@@ -26,10 +26,17 @@ interface ProfileModalProps {
   user: User;
   votes: VoteRecord[];
   activeSeasonNumber: number;
+  canRateInSeason: boolean;
+  voteDisabledReason: string;
+  hasRatedInSeason: boolean;
   allCards: CardItem[];
   ornamentSettingsByTier?: TierCardOrnamentSettings;
   seasonArchives: SeasonArchive[];
+  archivedCommentsBySeason: Record<number, PlayerComment[]>;
   currentUser: User | null;
+  matchRecords: MatchRecord[];
+  canManageMatchStats: boolean;
+  onAddManualMatchStats: (input: { userId: string; stats: UserStats; result: Exclude<MatchResult, 'unrecorded'> }) => Promise<string | null>;
   isOwnProfile: boolean;
   canImpersonateUser: boolean;
   canResetRatings: boolean;
@@ -37,13 +44,13 @@ interface ProfileModalProps {
   onResetRating: (userId: string) => void;
   canDeleteComments: boolean;
   onUpdateProfile: (updated: Partial<User>) => string | null | Promise<string | null>;
-  onCastVote: (vote: { targetUserId: string; score: number; comment?: string }) => void;
+  onCastVote: (vote: { targetUserId: string; score: number; comment?: string }) => Promise<string | null>;
   onAddComment: (targetUserId: string, text: string) => void;
   onDeleteComment: (targetUserId: string, commentId: string) => void;
   onOpenReportModal?: (targetUser: User) => void;
 }
 
-type ProfileTab = 'profile' | 'stats' | 'history' | 'comments';
+type ProfileTab = 'profile' | 'stats' | 'history' | 'votes';
 
 const tierLabels: Record<EloTier, string> = {
   lenda: 'Lenda',
@@ -68,10 +75,17 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   user,
   votes,
   activeSeasonNumber,
+  canRateInSeason,
+  voteDisabledReason,
+  hasRatedInSeason,
   allCards,
   ornamentSettingsByTier,
   seasonArchives,
+  archivedCommentsBySeason,
   currentUser,
+  matchRecords,
+  canManageMatchStats,
+  onAddManualMatchStats,
   isOwnProfile,
   canImpersonateUser,
   canResetRatings,
@@ -86,19 +100,23 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
 }) => {
   const [name, setName] = useState(user.name);
   const [handle, setHandle] = useState(user.handle);
-  const [email, setEmail] = useState(user.email || '');
   const [avatar, setAvatar] = useState(user.avatar.startsWith('data:') ? '' : user.avatar);
   const [bio, setBio] = useState(user.bio);
   const [favoriteChampion, setFavoriteChampion] = useState(user.favoriteChampion);
   const [primaryLane, setPrimaryLane] = useState<Lane>(user.primaryLane);
   const [riotId, setRiotId] = useState(user.riotId);
   const [seasonFilter, setSeasonFilter] = useState('all');
-  const [activeTab, setActiveTab] = useState<ProfileTab>(isOwnProfile ? 'profile' : 'stats');
+  const [activeTab, setActiveTab] = useState<ProfileTab>(isOwnProfile ? 'profile' : 'votes');
   const [scoreInput, setScoreInput] = useState('');
   const [commentInput, setCommentInput] = useState('');
   const [feedback, setFeedback] = useState<string | null>(null);
   const [profileSaveError, setProfileSaveError] = useState<string | null>(null);
   const [profileSaving, setProfileSaving] = useState(false);
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [matchStatsSubmitting, setMatchStatsSubmitting] = useState(false);
+  const [matchStatsMessage, setMatchStatsMessage] = useState<string | null>(null);
+  const [matchResult, setMatchResult] = useState<Exclude<MatchResult, 'unrecorded'>>('victory');
+  const [manualStats, setManualStats] = useState<UserStats>({ kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 });
   const [avatarLoading, setAvatarLoading] = useState(false);
   const avatarFileInput = useRef<HTMLInputElement>(null);
 
@@ -107,8 +125,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     () => Array.from(new Set([
       ...userCards.map((card) => card.season),
       ...seasonArchives.filter((season) => season.playerSnapshots.some((player) => player.userId === user.id)).map((season) => season.number),
+      ...Object.keys(archivedCommentsBySeason).map(Number),
     ])).sort((a, b) => b - a),
-    [userCards, seasonArchives, user.id]
+    [userCards, seasonArchives, archivedCommentsBySeason, user.id]
   );
   const filteredCards = userCards.filter((card) => seasonFilter === 'all' || card.season === Number(seasonFilter));
   const seasonRecords = seasonArchives
@@ -118,7 +137,15 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
       player: season.playerSnapshots.find((snapshot) => snapshot.userId === user.id),
     }))
     .filter((record) => record.player);
-  const comments = user.comments || [];
+  const comments = (user.comments || []).filter((comment) => comment.season === activeSeasonNumber);
+  const archivedCommentGroups = Object.entries(archivedCommentsBySeason)
+    .map(([season, seasonComments]) => ({ season: Number(season), comments: seasonComments }))
+    .filter((record) => record.comments.length > 0 && seasonFilter !== 'all' && record.season === Number(seasonFilter))
+    .sort((a, b) => b.season - a.season);
+  const receivedVotes = useMemo(
+    () => votes.filter((vote) => vote.targetUserId === user.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    [votes, user.id],
+  );
   const currentSeasonVotes = useMemo(
     () => votes.filter((vote) => vote.targetUserId === user.id && vote.season === activeSeasonNumber),
     [votes, user.id, activeSeasonNumber],
@@ -127,7 +154,16 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     ? Math.round(currentSeasonVotes.reduce((sum, vote) => sum + vote.score, 0) / currentSeasonVotes.length)
     : null;
   const tier = currentAverage === null ? null : getTierFromScore(currentAverage, Boolean(user.isCriminoso));
-  const kda = formatKda(user.stats);
+  const seasonMatchRecords = matchRecords.filter((record) => record.playerId === user.id && record.season === activeSeasonNumber);
+  const recordedSeasonStats: UserStats = seasonMatchRecords.length ? {
+    kills: Math.round(seasonMatchRecords.reduce((sum, record) => sum + record.stats.kills, 0) / seasonMatchRecords.length),
+    deaths: Math.round(seasonMatchRecords.reduce((sum, record) => sum + record.stats.deaths, 0) / seasonMatchRecords.length),
+    assists: Math.round(seasonMatchRecords.reduce((sum, record) => sum + record.stats.assists, 0) / seasonMatchRecords.length),
+    minions: Math.round(seasonMatchRecords.reduce((sum, record) => sum + record.stats.minions, 0) / seasonMatchRecords.length),
+    gold: Math.round(seasonMatchRecords.reduce((sum, record) => sum + record.stats.gold, 0) / seasonMatchRecords.length),
+  } : { kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 };
+  const hasSeasonMatchStats = seasonMatchRecords.length > 0;
+  const kda = hasSeasonMatchStats ? formatKda(recordedSeasonStats) : '—';
   const avatarPreview = avatar.trim() || user.avatar;
 
   if (!isOpen) return null;
@@ -141,7 +177,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     setProfileSaveError(null);
     setProfileSaving(true);
     try {
-      const saveError = await onUpdateProfile({ name, handle: normalizedHandle, email: email.trim().toLowerCase(), avatar: avatar.trim() || user.avatar, bio, favoriteChampion, primaryLane, riotId });
+      const saveError = await onUpdateProfile({ name, handle: normalizedHandle, avatar: avatar.trim() || user.avatar, bio, favoriteChampion, primaryLane, riotId });
       if (saveError) {
         setProfileSaveError(saveError);
         return;
@@ -191,36 +227,63 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     }
   };
 
-  const handleSubmitComment = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!currentUser || currentUser.id === user.id) return;
-
-    const comment = commentInput.trim();
-    const score = scoreInput === '' ? undefined : Number(scoreInput);
-    if (score === undefined && !comment) {
-      setFeedback('Digite um comentário ou uma nota para publicar.');
-      return;
-    }
-    if (score !== undefined && (!Number.isInteger(score) || score < 0 || score > 100)) {
+  const handleSubmitVote = async () => {
+    if (!currentUser || (currentUser.id === user.id && currentUser.role !== 'criador') || commentSubmitting || !canRateInSeason || hasRatedInSeason) return;
+    const score = scoreInput === '' ? NaN : Number(scoreInput);
+    if (!Number.isInteger(score) || score < 0 || score > 100) {
       setFeedback('A nota precisa ser um número inteiro entre 0 e 100.');
       return;
     }
-
-    if (score !== undefined) {
-      onCastVote({ targetUserId: user.id, score, comment: comment || undefined });
-    } else {
-      onAddComment(user.id, comment);
+    setCommentSubmitting(true);
+    const error = await onCastVote({ targetUserId: user.id, score });
+    setCommentSubmitting(false);
+    if (error) {
+      setFeedback(error);
+      return;
     }
     setScoreInput('');
+    setFeedback('Nota confirmada nesta temporada.');
+  };
+
+  const handleSubmitComment = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!currentUser || currentUser.id === user.id || commentSubmitting) return;
+
+    const comment = commentInput.trim();
+    if (!comment) {
+      setFeedback('Escreva um comentário antes de publicar.');
+      return;
+    }
     setCommentInput('');
+    onAddComment(user.id, comment);
     setFeedback('Publicado no perfil do jogador.');
+  };
+
+  const handleAddManualStats = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!canManageMatchStats || matchStatsSubmitting) return;
+    setMatchStatsSubmitting(true);
+    setMatchStatsMessage(null);
+    try {
+      const error = await onAddManualMatchStats({ userId: user.id, stats: manualStats, result: matchResult });
+      if (error) {
+        setMatchStatsMessage(error);
+        return;
+      }
+      setManualStats({ kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 });
+      setMatchStatsMessage('Partida registrada nas estatísticas da temporada.');
+    } catch (error) {
+      setMatchStatsMessage(error instanceof Error ? error.message : 'Não foi possível salvar as estatísticas da partida.');
+    } finally {
+      setMatchStatsSubmitting(false);
+    }
   };
 
   const tabs: { id: ProfileTab; label: string }[] = [
     ...(isOwnProfile ? [{ id: 'profile' as const, label: 'Meu perfil' }] : []),
+    { id: 'votes', label: `Votos (${receivedVotes.length})` },
     { id: 'stats', label: 'Estatísticas' },
     { id: 'history', label: 'Histórico' },
-    { id: 'comments', label: `Conversa (${comments.length})` },
   ];
 
   return (
@@ -262,7 +325,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               </button>
             )}
             {canImpersonateUser && !isOwnProfile && (
-              <button type="button" onClick={() => { onImpersonateUser(user); setActiveTab('profile'); }} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/50 bg-amber-950/50 px-2.5 py-1.5 text-xs font-bold text-amber-200 transition-colors hover:bg-amber-900/60">
+              <button type="button" onClick={() => onImpersonateUser(user)} className="inline-flex items-center gap-1.5 rounded-lg border border-amber-600/50 bg-amber-950/50 px-2.5 py-1.5 text-xs font-bold text-amber-200 transition-colors hover:bg-amber-900/60">
                 <LogIn className="h-3.5 w-3.5" /> Assumir conta
               </button>
             )}
@@ -303,9 +366,6 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 </label>
                 <label className="text-slate-300">Seu @ no site
                   <input value={handle} onChange={(event) => { setHandle(event.target.value); setProfileSaveError(null); }} placeholder="@nick" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 p-2.5 font-mono text-white" />
-                </label>
-                <label className="text-slate-300">E-mail de login (privado)
-                  <input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setProfileSaveError(null); }} placeholder="voce@exemplo.com" className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-900 p-2.5 text-white" />
                 </label>
                 <div className="md:col-span-2">
                   <span className="text-slate-300">Foto do perfil</span>
@@ -375,9 +435,44 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 </div>
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <StatTile label="KDA (A/M/A)" value={kda} compact />
-                  <StatTile label="Minions" value={user.stats.minions ? user.stats.minions.toLocaleString('pt-BR') : '—'} compact />
-                  <StatTile label="Gold" value={user.stats.gold ? formatGold(user.stats.gold) : '—'} compact />
+                  <StatTile label="Minions" value={hasSeasonMatchStats ? recordedSeasonStats.minions.toLocaleString('pt-BR') : '—'} compact />
+                  <StatTile label="Gold" value={hasSeasonMatchStats ? formatGold(recordedSeasonStats.gold) : '—'} compact />
                 </div>
+                {canManageMatchStats && (
+                  <form onSubmit={(event) => void handleAddManualStats(event)} className="mt-4 space-y-3 rounded-xl border border-amber-700/40 bg-amber-950/10 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h4 className="text-xs font-bold text-amber-200">Inserir dados da partida</h4>
+                      <p className="mt-1 text-[10px] text-slate-400">Os valores exibidos são a média das partidas da temporada {activeSeasonNumber}.</p>
+                      </div>
+                      <label className="text-[10px] font-semibold text-slate-300">Resultado
+                        <select value={matchResult} onChange={(event) => setMatchResult(event.target.value as Exclude<MatchResult, 'unrecorded'>)} className="mt-1 block rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 text-xs text-white">
+                          <option value="victory">Vitória</option>
+                          <option value="defeat">Derrota</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      {([
+                        ['kills', 'Abates'],
+                        ['deaths', 'Mortes'],
+                        ['assists', 'Assistências'],
+                        ['minions', 'Minions'],
+                        ['gold', 'Gold'],
+                      ] as const).map(([field, label]) => (
+                        <label key={field} className="text-[10px] font-semibold text-slate-400">{label}
+                          <input type="number" min="0" step="1" value={manualStats[field]} onChange={(event) => setManualStats((previous) => ({ ...previous, [field]: Math.max(0, Number(event.target.value) || 0) }))} className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950 px-2.5 py-2 font-mono text-sm text-amber-200" />
+                        </label>
+                      ))}
+                    </div>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p aria-live="polite" className={`text-[11px] ${matchStatsMessage?.startsWith('Partida registrada') ? 'text-emerald-300' : 'text-rose-300'}`}>{matchStatsMessage}</p>
+                      <button type="submit" disabled={matchStatsSubmitting} className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-2 text-xs font-bold text-slate-950 transition hover:bg-amber-400 disabled:cursor-wait disabled:opacity-60">
+                        <Save className="h-3.5 w-3.5" /> {matchStatsSubmitting ? 'Salvando…' : 'Confirmar estatísticas'}
+                      </button>
+                    </div>
+                  </form>
+                )}
                 <div className="mt-4 grid grid-cols-1 gap-3 border-t border-slate-800 pt-4 sm:grid-cols-3">
                   <StatTile label="Títulos MVP" value={user.mvpCount} compact />
                   <StatTile label="Títulos ACE" value={user.aceCount} compact />
@@ -420,6 +515,36 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 </div>
               )}
 
+              {archivedCommentGroups.length > 0 && (
+                <section className="space-y-3">
+                  <div className="border-b border-slate-800 pb-2">
+                    <h3 className="font-display text-sm font-bold text-white">Comentários arquivados por temporada</h3>
+                    <p className="mt-1 text-xs text-slate-400">Comentários antigos ficam guardados na temporada em que foram publicados.</p>
+                  </div>
+                  {archivedCommentGroups.map(({ season, comments: seasonComments }) => (
+                    <div key={season} className="space-y-2 rounded-xl border border-slate-800 bg-slate-900/40 p-3">
+                      <h4 className="text-xs font-bold text-amber-200">Temporada {season}</h4>
+                      {seasonComments.map((comment) => (
+                        <article key={comment.id} className="flex items-start gap-3 rounded-lg border border-slate-800 bg-slate-950/70 p-3 text-xs">
+                          <img src={comment.authorAvatar} alt="" className="mt-0.5 h-8 w-8 shrink-0 rounded-full object-cover" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5"><strong className="text-white">{comment.authorName}</strong><span className="font-mono text-[10px] text-slate-400">{comment.authorHandle}</span></div>
+                              <div className="flex items-center gap-2">
+                                {comment.scoreGiven !== undefined && <span className="rounded border border-amber-500/30 bg-black/40 px-1.5 py-0.5 font-mono text-[10px] font-bold text-amber-300">Nota {comment.scoreGiven}</span>}
+                                {canDeleteComments && <button type="button" onClick={() => onDeleteComment(user.id, comment.id)} aria-label={`Excluir comentário de ${comment.authorName}`} className="rounded p-1 text-slate-500 transition hover:bg-red-950 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></button>}
+                              </div>
+                            </div>
+                            <p className="mt-1.5 whitespace-pre-wrap leading-relaxed text-slate-200">{comment.text}</p>
+                            <time className="mt-1.5 block text-[10px] text-slate-500">{comment.createdAt}</time>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ))}
+                </section>
+              )}
+
               {filteredCards.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-800 p-10 text-center text-xs text-slate-500">Nenhuma carta salva nesta temporada.</div>
               ) : (
@@ -430,42 +555,67 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             </section>
           )}
 
-          {activeTab === 'comments' && (
+          {activeTab === 'votes' && (
             <section className="space-y-4">
               <div className="flex items-center justify-between border-b border-slate-800 pb-3">
                 <div>
-                  <h3 className="flex items-center gap-2 font-display text-sm font-bold text-white"><MessageSquare className="h-4 w-4 text-red-400" /> Conversa do jogador</h3>
-                  <p className="mt-1 text-xs text-slate-400">Comentários publicados ficam neste perfil; eles não são enviados como mensagem privada.</p>
+                  <h3 className="flex items-center gap-2 font-display text-sm font-bold text-white"><Star className="h-4 w-4 text-amber-300" /> Votos do jogador</h3>
+                  <p className="mt-1 text-xs text-slate-400">Registros de notas desta temporada e de temporadas anteriores.</p>
                 </div>
-                <span className="rounded-full bg-slate-800 px-2.5 py-1 font-mono text-[10px] text-slate-300">{comments.length}</span>
+                <span className="rounded-full bg-slate-800 px-2.5 py-1 font-mono text-[10px] text-slate-300">{receivedVotes.length}</span>
               </div>
 
-              {!isOwnProfile && (
+              {(!isOwnProfile || currentUser?.role === 'criador') && (
                 currentUser ? (
-                  <form onSubmit={handleSubmitComment} className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/50 p-4">
-                    <div className="grid gap-3 sm:grid-cols-[150px_1fr]">
+                  <div className="space-y-3 rounded-xl border border-slate-800 bg-slate-900/50 p-4">
+                    <div className="flex flex-wrap items-end gap-3">
                       <label className="text-xs font-semibold text-slate-300">Nota opcional (0 a 100)
                         <span className="relative mt-1 block">
                           <Calculator className="absolute left-3 top-3 h-4 w-4 text-amber-400" />
-                          <input type="number" min="0" max="100" step="1" value={scoreInput} onChange={(event) => setScoreInput(event.target.value)} placeholder="—" className="w-full rounded-xl border border-slate-700 bg-slate-950 py-2.5 pl-9 pr-3 font-mono text-white" />
+                          <input type="number" min="0" max="100" step="1" value={scoreInput} onChange={(event) => setScoreInput(event.target.value)} disabled={!canRateInSeason || hasRatedInSeason} placeholder="—" title={hasRatedInSeason ? 'Você já avaliou este jogador nesta temporada' : canRateInSeason ? 'Nota de 0 a 100' : voteDisabledReason} className="w-36 rounded-xl border border-slate-700 bg-slate-950 py-2.5 pl-9 pr-3 font-mono text-white disabled:cursor-not-allowed disabled:opacity-50" />
                         </span>
                       </label>
-                      <label className="text-xs font-semibold text-slate-300">Comentário
+                      <button type="button" onClick={() => void handleSubmitVote()} disabled={!canRateInSeason || hasRatedInSeason || commentSubmitting || !scoreInput} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-amber-600/50 bg-amber-950/40 px-4 py-2 text-xs font-bold text-amber-200 transition hover:border-amber-400 hover:bg-amber-900/50 disabled:cursor-not-allowed disabled:opacity-50">
+                        <Star className="h-3.5 w-3.5" /> {commentSubmitting ? 'Confirmando…' : 'Confirmar nota'}
+                      </button>
+                    </div>
+                    {(hasRatedInSeason || !canRateInSeason) && (
+                      <p className="text-[11px] text-slate-500">{hasRatedInSeason ? 'Você já enviou sua nota para este jogador nesta temporada. Pode continuar comentando.' : `${voteDisabledReason} Comentários continuam disponíveis.`}</p>
+                    )}
+                    <form onSubmit={handleSubmitComment} className="space-y-2 border-t border-slate-800 pt-3">
+                      <label className="block text-xs font-semibold text-slate-300">Comentário
                         <textarea value={commentInput} onChange={(event) => setCommentInput(event.target.value)} maxLength={500} rows={2} placeholder="Escreva um comentário para este perfil..." className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 p-2.5 text-white placeholder:text-slate-500" />
                       </label>
-                    </div>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p aria-live="polite" className={`text-xs ${feedback?.startsWith('Publicado') ? 'text-emerald-400' : 'text-amber-300'}`}>{feedback}</p>
-                      <button type="submit" className="rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-4 py-2 text-xs font-bold text-white transition hover:from-red-500 hover:to-rose-500">Publicar no perfil</button>
-                    </div>
-                  </form>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p aria-live="polite" className={`text-xs ${feedback?.includes('confirmada') || feedback?.startsWith('Publicado') ? 'text-emerald-400' : 'text-amber-300'}`}>{feedback}</p>
+                        <button type="submit" disabled={commentSubmitting || !commentInput.trim()} className="rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-4 py-2 text-xs font-bold text-white transition hover:from-red-500 hover:to-rose-500 disabled:cursor-wait disabled:opacity-60">Publicar comentário</button>
+                      </div>
+                    </form>
+                  </div>
                 ) : (
-                  <p className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 text-xs text-slate-400">Entre na sua conta para comentar ou avaliar.</p>
+                  <p className="rounded-xl border border-slate-800 bg-slate-900/50 p-4 text-xs text-slate-400">Entre na sua conta para votar ou comentar.</p>
                 )
               )}
 
+              {canResetRatings && receivedVotes.length > 0 && (
+                <div className="space-y-2">
+                  {receivedVotes.map((vote) => (
+                    <article key={vote.id} className="flex items-start justify-between gap-3 rounded-xl border border-amber-700/25 bg-slate-900/60 p-3 text-xs">
+                      <div className="min-w-0">
+                        <p className="font-bold text-white">{vote.fromUserName} avaliou na temporada {vote.season}</p>
+                        {vote.comment && <p className="mt-1.5 whitespace-pre-wrap text-slate-300">{vote.comment}</p>}
+                        <time className="mt-1.5 block text-[10px] text-slate-500">{new Date(vote.createdAt).toLocaleDateString('pt-BR')}</time>
+                      </div>
+                      <span className="shrink-0 rounded border border-amber-500/30 bg-black/40 px-2 py-1 font-mono text-sm font-bold text-amber-300">{vote.score}</span>
+                    </article>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 border-b border-slate-800 pb-2 pt-2 text-xs font-bold text-white"><MessageSquare className="h-4 w-4 text-red-400" /> Comentários da temporada {activeSeasonNumber}</div>
+
               {comments.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-slate-800 p-8 text-center text-xs text-slate-500">Ainda não há comentários neste perfil.</div>
+                <div className="rounded-xl border border-dashed border-slate-800 p-8 text-center text-xs text-slate-500">Ainda não há comentários nesta temporada.</div>
               ) : (
                 <div className="space-y-2.5">
                   {comments.map((comment) => (

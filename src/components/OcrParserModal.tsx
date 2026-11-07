@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import type { User, UserStats } from '../types';
+import type { MatchResult, User, UserStats } from '../types';
 import { getSupabaseAuthorizationHeaders } from '../lib/supabase';
 import { sound } from '../utils/audio';
 import { isCompleteMatchStats, matchOcrPlayerName, parseOcrMatchStats, type ExtractedMatchStats } from '../utils/matchStats';
@@ -9,10 +9,10 @@ interface OcrParserModalProps {
   isOpen: boolean;
   onClose: () => void;
   users: User[];
-  onApplyMatchStats: (result: { userId: string; playerName: string; stats: UserStats }) => Promise<void>;
+  onApplyMatchStats: (result: { userId: string; playerName: string; stats: UserStats; result: Exclude<MatchResult, 'unrecorded'>; imageFingerprint: string }) => Promise<void>;
 }
 
-type ReviewData = ExtractedMatchStats & { matchedUserId?: string; ambiguousMatch: boolean };
+type ReviewData = ExtractedMatchStats & { matchedUserId?: string; ambiguousMatch: boolean; result?: Exclude<MatchResult, 'unrecorded'> };
 
 const IMAGE_MAX_SIZE = 15 * 1024 * 1024;
 const OCR_IMAGE_MAX_SIZE = 2_700_000;
@@ -45,6 +45,14 @@ async function prepareImageForOcr(file: File): Promise<{ dataUrl: string; mimeTy
   } finally {
     bitmap.close();
   }
+}
+
+async function fingerprintImage(dataUrl: string): Promise<string> {
+  const encoded = dataUrl.split(',')[1];
+  if (!encoded || !globalThis.crypto?.subtle) throw new Error('Não foi possível validar o print. Selecione a imagem novamente.');
+  const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 export const OcrParserModal: React.FC<OcrParserModalProps> = ({ isOpen, onClose, users, onApplyMatchStats }) => {
@@ -137,8 +145,8 @@ export const OcrParserModal: React.FC<OcrParserModalProps> = ({ isOpen, onClose,
   };
 
   const saveMatchStats = async () => {
-    if (!extractedData || !extractedData.matchedUserId || !isCompleteMatchStats(extractedData)) {
-      setError('Confirme o jogador e preencha KDA, minions e ouro antes de salvar.');
+    if (!extractedData || !extractedData.matchedUserId || !extractedData.result || !isCompleteMatchStats(extractedData)) {
+      setError('Confirme o jogador, o resultado e preencha KDA, minions e ouro antes de salvar.');
       return;
     }
     setIsSaving(true);
@@ -154,8 +162,10 @@ export const OcrParserModal: React.FC<OcrParserModalProps> = ({ isOpen, onClose,
           minions: extractedData.minions,
           gold: extractedData.gold,
         },
+        result: extractedData.result,
+        imageFingerprint: await fingerprintImage(imagePreview || ''),
       });
-      setSuccessMsg('Estatísticas substituídas e sincronizadas no perfil do jogador.');
+      setSuccessMsg('Partida adicionada à média da temporada. Os dados mais recentes também foram atualizados no perfil.');
       sound.playVictory();
       window.setTimeout(onClose, 900);
     } catch (saveError) {
@@ -248,6 +258,22 @@ export const OcrParserModal: React.FC<OcrParserModalProps> = ({ isOpen, onClose,
               {selectedUser && <p className="text-xs text-emerald-300">Correspondência: {selectedUser.name} · {selectedUser.handle}</p>}
               {!selectedUser && <p className="text-xs text-amber-300">{extractedData.ambiguousMatch ? 'O nome combina com mais de um perfil. Escolha a pessoa correta.' : 'Não encontrei uma correspondência única. Escolha o perfil correto acima.'}</p>}
 
+              <fieldset className="rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                <legend className="px-1 text-xs font-semibold text-slate-300">Resultado da partida</legend>
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    { value: 'victory', label: 'Vitória', active: 'border-emerald-500/60 bg-emerald-950/50 text-emerald-200' },
+                    { value: 'defeat', label: 'Derrota', active: 'border-rose-500/60 bg-rose-950/50 text-rose-200' },
+                  ] as const).map((option) => (
+                    <button key={option.value} type="button" aria-pressed={extractedData.result === option.value}
+                      onClick={() => setExtractedData({ ...extractedData, result: option.value })}
+                      className={`rounded-lg border px-3 py-2.5 text-sm font-bold transition ${extractedData.result === option.value ? option.active : 'border-slate-700 bg-slate-900 text-slate-400 hover:border-slate-600 hover:text-white'}`}>
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                 {fields.map(({ key, label, limit }) => (
                   <label key={key} className="rounded-xl border border-slate-800 bg-slate-950/70 p-3 text-xs font-semibold text-slate-300">
@@ -257,6 +283,7 @@ export const OcrParserModal: React.FC<OcrParserModalProps> = ({ isOpen, onClose,
                 ))}
               </div>
               {!statsComplete && <p className="text-xs text-amber-300">Confira os campos vazios e complete os valores que não puderam ser lidos antes de salvar.</p>}
+              {!extractedData.result && <p className="text-xs text-amber-300">Selecione se o jogador venceu ou perdeu para registrar o resultado da temporada.</p>}
               {extractedData.notes && <p className="text-xs text-slate-400">Observação do OCR: {extractedData.notes}</p>}
             </section>
           )}
@@ -264,9 +291,9 @@ export const OcrParserModal: React.FC<OcrParserModalProps> = ({ isOpen, onClose,
 
         <footer className="flex items-center justify-between gap-3 border-t border-slate-800 bg-slate-900 p-4">
           <button type="button" onClick={onClose} className="rounded-lg bg-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white">Cancelar</button>
-          <button type="button" onClick={() => void saveMatchStats()} disabled={!extractedData?.matchedUserId || !statsComplete || isLoading || isSaving} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-red-950 transition disabled:cursor-not-allowed disabled:opacity-40">
+          <button type="button" onClick={() => void saveMatchStats()} disabled={!extractedData?.matchedUserId || !extractedData?.result || !statsComplete || isLoading || isSaving} className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-red-600 to-rose-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-red-950 transition disabled:cursor-not-allowed disabled:opacity-40">
             {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            {isSaving ? 'Salvando…' : 'Substituir estatísticas do jogador'}
+            {isSaving ? 'Salvando…' : 'Adicionar partida à temporada'}
           </button>
         </footer>
       </section>

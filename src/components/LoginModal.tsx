@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from '@supabase/supabase-js';
 import type { User } from '../types';
 import { sound } from '../utils/audio';
 import { normalizeEmail, normalizeHandle, normalizeRiotId, validateUniqueUserIdentity } from '../utils/userIdentity';
@@ -50,6 +51,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, users, 
       const { data: result, error: invokeError } = await supabase.functions.invoke('auth-login', {
         body: { login: login.trim(), password },
       });
+      if (invokeError instanceof FunctionsHttpError) {
+        const responseBody = await invokeError.context.json().catch(() => null) as { error?: unknown } | null;
+        throw new Error(typeof responseBody?.error === 'string'
+          ? responseBody.error
+          : 'O serviço de login recusou a solicitação. Confira os dados e tente novamente.');
+      }
+      if (invokeError instanceof FunctionsRelayError) {
+        throw new Error('O serviço de autenticação está temporariamente indisponível. Tente novamente em instantes.');
+      }
+      if (invokeError instanceof FunctionsFetchError) {
+        throw new Error('Não foi possível conectar ao serviço de autenticação. Verifique a conexão e tente novamente.');
+      }
       if (invokeError) throw new Error('Não foi possível entrar agora. Confira seu login e tente novamente.');
       if (!result?.session) throw new Error(result?.error || 'Login ou senha inválidos.');
       const { data, error: sessionError } = await supabase.auth.setSession(result.session);

@@ -23,10 +23,10 @@ export const INITIAL_USERS: User[] = [
     id: 'user_derick',
     handle: '@derick',
     name: 'Derick (Lenda Viva)',
-    role: 'capitao',
+    role: 'jogador',
     isOnline: false,
     avatar: TEST_AVATARS.samurai,
-    bio: 'Capitão da TAV Esports. Tricampeão supremo e Lenda eterna da comunidade.',
+    bio: 'Tricampeão supremo e Lenda eterna da comunidade.',
     favoriteChampion: 'Kayle',
     primaryLane: 'TOP',
     riotId: 'Derick#BR1',
@@ -39,18 +39,7 @@ export const INITIAL_USERS: User[] = [
     entryDate: '10/01/2024',
     createdAt: '2024-01-10T12:00:00Z',
     stats: { kills: 14, deaths: 2, assists: 9, minions: 0, gold: 0 },
-    comments: [
-      {
-        id: 'c_1',
-        authorId: 'user_nicolas',
-        authorName: 'Nicolas Like',
-        authorHandle: '@nicolas',
-        authorAvatar: TEST_AVATARS.ninja,
-        text: 'Melhor toplaner do servidor. Domina a lane e carrega qualquer teamfight!',
-        scoreGiven: 99,
-        createdAt: '12/03/2024'
-      }
-    ]
+    comments: []
   },
   {
     id: 'user_nicolas',
@@ -77,10 +66,10 @@ export const INITIAL_USERS: User[] = [
     id: 'user_maycao',
     handle: '@maycao',
     name: 'Maycão Chave',
-    role: 'moderador',
+    role: 'jogador',
     isOnline: false,
     avatar: TEST_AVATARS.shadow,
-    bio: 'Moderador oficial. Assassino implacável no Mid eGrão-Mestre em teamfights.',
+    bio: 'Assassino implacável no Mid e Grão-Mestre em teamfights.',
     favoriteChampion: 'Zed',
     primaryLane: 'MID',
     riotId: 'Maycao#BR1',
@@ -203,10 +192,10 @@ export const INITIAL_USERS: User[] = [
     id: 'user_raiq',
     handle: '@raiq',
     name: 'RAIQ CABS',
-    role: 'capitao',
+    role: 'jogador',
     isOnline: false,
     avatar: TEST_AVATARS.brawler,
-    bio: 'Capitão da CABS. Campeão consolidado e mestre da resenha da comunidade.',
+    bio: 'Campeão consolidado e mestre da resenha da comunidade.',
     favoriteChampion: 'Lee Sin',
     primaryLane: 'JUNGLE',
     riotId: 'Raiq#BR1',
@@ -260,7 +249,7 @@ export const INITIAL_USERS: User[] = [
     aceCount: 1,
     entryDate: '15/03/2024',
     createdAt: '2024-03-15T18:00:00Z',
-    stats: { kills: 3, deaths: 8, assists: 3, minions: 0, gold: 0 },
+    stats: { kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 },
     comments: []
   },
   {
@@ -304,18 +293,7 @@ export const INITIAL_USERS: User[] = [
     entryDate: '05/01/2024',
     createdAt: '2024-01-05T19:00:00Z',
     stats: { kills: 2, deaths: 12, assists: 3, minions: 0, gold: 0 },
-    comments: [
-      {
-        id: 'c_2',
-        authorId: 'user_derick',
-        authorName: 'Derick (Lenda Viva)',
-        authorHandle: '@derick',
-        authorAvatar: TEST_AVATARS.samurai,
-        text: 'Não comprou bota aos 25 minutos e entregou o Barão. Sentenciado à prisão perpétua!',
-        scoreGiven: 35,
-        createdAt: '20/03/2024'
-      }
-    ]
+    comments: []
   }
 ];
 
@@ -528,7 +506,7 @@ export const INITIAL_CARDS: CardItem[] = [
     isAce: false,
     isCriminoso: false,
     isLegend: false,
-    stats: { kills: 3, deaths: 8, assists: 3, minions: 0, gold: 0 },
+    stats: { kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 },
     date: '2 semanas atrás'
   },
   // 12. Madeira (Teco - Novo Elo!)

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { User, NotificationItem, UserRole } from '../types';
+import { User, NotificationItem, TestRole } from '../types';
 import mascotAvatar from '../assets/images/personas_duck_mascot_1793729518059.jpg';
 import { 
   Bell, 
@@ -32,7 +32,8 @@ interface NavbarProps {
   onMarkAllNotificationsRead: () => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
-  onTestRole: (role: UserRole) => void;
+  onTestRole: (role: TestRole) => void;
+  isCaptainPreview?: boolean;
   canTestRoles: boolean;
 }
 
@@ -54,11 +55,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleTheme,
   onTestRole,
   canTestRoles,
+  isCaptainPreview = false,
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [showRoleTester, setShowRoleTester] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const notificationsRef = useRef<HTMLDivElement>(null);
+  const roleTesterRef = useRef<HTMLDivElement>(null);
   const accountMenuRef = useRef<HTMLDivElement>(null);
 
   const unreadNotifications = notifications.filter((n) => !n.read);
@@ -77,6 +80,21 @@ export const Navbar: React.FC<NavbarProps> = ({
       document.removeEventListener('keydown', closeOnEscape);
     };
   }, [showNotifications]);
+  useEffect(() => {
+    if (!showRoleTester) return;
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (!roleTesterRef.current?.contains(event.target as Node)) setShowRoleTester(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowRoleTester(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [showRoleTester]);
   useEffect(() => {
     if (!showAccountMenu) return;
     const closeOnOutsideClick = (event: PointerEvent) => {
@@ -188,17 +206,17 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Zone 3: Primary Actions */}
         <div className="flex items-center gap-2.5 shrink-0">
           {/* Quick Role Tester Toggle */}
-          {canTestRoles && <div className="relative">
+          {canTestRoles && <div className="relative" ref={roleTesterRef}>
             <button
               type="button"
               onClick={() => setShowRoleTester(!showRoleTester)}
               aria-expanded={showRoleTester}
-              aria-label={`Testar outro cargo. Cargo atual: ${currentUser?.role || 'Visitante'}`}
+              aria-label={`Testar outro cargo. Cargo atual: ${isCaptainPreview ? 'capitão' : currentUser?.role || 'Visitante'}`}
               className="px-2.5 py-1.5 rounded-xl bg-slate-900/90 border border-amber-500/40 text-amber-300 hover:text-white text-xs font-mono font-bold flex items-center gap-1.5 transition-colors"
               title="Testar como outros cargos"
             >
               <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Cargo: {currentUser?.role || 'Visitante'}</span>
+              <span className="hidden sm:inline">Cargo: {isCaptainPreview ? 'capitão' : currentUser?.role || 'Visitante'}</span>
             </button>
 
             {showRoleTester && (
@@ -206,7 +224,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="text-[10px] font-mono text-slate-400 block px-2 py-1 uppercase font-bold border-b border-slate-800 mb-1">
                   Simular Cargo:
                 </span>
-                {(['criador', 'moderador', 'capitao', 'jogador', 'visitante'] as UserRole[]).map((r) => (
+                {(['criador', 'capitão', 'jogador', 'visitante'] as TestRole[]).map((r) => (
                   <button
                     key={r}
                     type="button"
@@ -215,7 +233,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                       setShowRoleTester(false);
                     }}
                     className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs capitalize transition-colors ${
-                      currentUser?.role === r
+                      (r === 'capitão' ? isCaptainPreview : !isCaptainPreview && currentUser?.role === r)
                         ? 'bg-red-600 text-white font-bold'
                         : 'text-slate-300 hover:bg-slate-900 hover:text-white'
                     }`}

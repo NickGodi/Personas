@@ -1,4 +1,6 @@
-export type UserRole = 'criador' | 'moderador' | 'capitao' | 'jogador' | 'visitante';
+/** Account roles are creator or player; captain status comes from the checked-in tournament roster. */
+export type UserRole = 'criador' | 'jogador' | 'visitante';
+export type TestRole = UserRole | 'capitão';
 
 export type EloTier = 
   | 'lenda'
@@ -47,8 +49,22 @@ export interface UserStats {
   gold: number;
 }
 
+export type MatchResult = 'victory' | 'defeat' | 'unrecorded';
+
+export interface MatchRecord {
+  id: string;
+  playerId: string;
+  season: number;
+  result: MatchResult;
+  stats: UserStats;
+  imageFingerprint: string;
+  createdAt: string;
+}
+
 export interface PlayerComment {
   id: string;
+  /** The season this comment belongs to; optional only for legacy records. */
+  season?: number;
   authorId: string;
   authorName: string;
   authorHandle: string;
@@ -58,8 +74,12 @@ export interface PlayerComment {
   createdAt: string;
 }
 
+export type SeasonCommentArchive = Record<number, Record<string, PlayerComment[]>>;
+
 export interface User {
   id: string;
+  /** Supabase Auth UID for the signed-in account, when available. */
+  authId?: string;
   handle: string; // @handle unico
   name: string;
   email?: string; // identificador de login privado e único quando informado
@@ -153,6 +173,16 @@ export interface Team {
 /** Shared tournament controls so every account sees the same attendance and live draft. */
 export interface SharedTournamentState {
   updatedAt: number;
+  /** Version marker used to clear browser-cached season data after a creator reset. */
+  seasonResetAt?: number;
+  /** The currently confirmed pre-game card, synchronized for every account. */
+  confirmedDeckCardId?: string | null;
+  /** A shared request requiring agreement from both captains and approval by the creator. */
+  captainRerollRequest?: CaptainRerollRequest | null;
+  /** Class pair drawn for the Inter Classe rule card. */
+  interClassDraw?: InterClassDraw | null;
+  /** Season number whose attendance list is currently being collected. */
+  attendanceSeason?: number;
   tournamentStarted: boolean;
   attendeeIds: string[];
   captainIds: [string, string];
@@ -165,6 +195,24 @@ export interface SharedTournamentState {
   teams: Team[];
 }
 
+export interface CaptainRerollRequest {
+  id: string;
+  requesterId: string;
+  requesterName: string;
+  opponentId: string;
+  status: 'waiting_opponent' | 'waiting_creator';
+  acceptedBy?: string;
+  acceptedByName?: string;
+  createdAt: number;
+}
+
+export interface InterClassDraw {
+  cardId: string;
+  blueClass: string;
+  redClass: string;
+  drawnAt: number;
+}
+
 export interface MatchDeckCard {
   id: string;
   title: string;
@@ -173,11 +221,15 @@ export interface MatchDeckCard {
   iconName: string;
   tags: string[];
   backgroundImage?: string;
+  /** Defaults to active for existing saved cards. */
+  isActive?: boolean;
 }
 
 export interface VoteRecord {
   id: string;
   fromUserId: string;
+  /** Auth UID used by Supabase to prevent duplicate ratings across devices. */
+  fromAuthUserId?: string;
   fromUserName: string;
   fromUserHandle: string;
   targetUserId: string;

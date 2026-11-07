@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActiveSeason } from '../types';
+import { ActiveSeason, User } from '../types';
 import { Check, Clock3, Flag, Play, Save, Users } from 'lucide-react';
 
 interface SeasonControlBannerProps {
@@ -8,6 +8,7 @@ interface SeasonControlBannerProps {
   checkInOpen: boolean;
   isCheckedIn: boolean;
   checkInCount: number;
+  checkedInPlayers: Array<Pick<User, 'id' | 'name'>>;
   checkInDisabled: boolean;
   onCheckIn: () => void;
   onStart: () => void;
@@ -20,6 +21,7 @@ export const SeasonControlBanner: React.FC<SeasonControlBannerProps> = ({
   checkInOpen,
   isCheckedIn,
   checkInCount,
+  checkedInPlayers,
   checkInDisabled,
   onCheckIn,
   onStart,
@@ -111,6 +113,19 @@ export const SeasonControlBanner: React.FC<SeasonControlBannerProps> = ({
           )}
         </div>
       </div>
+      {checkedInPlayers.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-slate-700/50 pt-3 sm:pl-[60px]">
+          <span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Participantes confirmados:</span>
+          {checkedInPlayers.map((player) => (
+            <span key={player.id} className="rounded-full border border-emerald-800/50 bg-emerald-950/40 px-2.5 py-1 text-[10px] font-semibold text-emerald-200">
+              {player.name}
+            </span>
+          ))}
+        </div>
+      )}
+      {!isActive && checkInOpen && checkInCount === 0 && (
+        <p className="mt-3 border-t border-slate-700/50 pt-3 text-xs text-slate-400 sm:pl-[60px]">Ninguém confirmou presença ainda.</p>
+      )}
     </section>
   );
 };

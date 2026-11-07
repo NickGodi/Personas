@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActiveSeason, CardItem, EloTier, Lane, SeasonArchive, User, VoteRecord } from '../types';
+import { ActiveSeason, CardItem, EloTier, Lane, MatchRecord, SeasonArchive, User, VoteRecord } from '../types';
 import { BarChart3, CalendarClock, CheckCircle2, ScanLine, Search, Trophy } from 'lucide-react';
 import { getTierFromScore } from '../data/initialData';
 import { RouteDistribution } from './RouteDistribution';
@@ -8,9 +8,11 @@ interface StatisticsSectionProps {
   users: User[];
   cards: CardItem[];
   votes: VoteRecord[];
+  matchRecords: MatchRecord[];
   activeSeason: ActiveSeason;
   seasonArchives: SeasonArchive[];
   onOpenProfile: (user: User) => void;
+  canImportOcr: boolean;
   onOpenOcr: () => void;
 }
 
@@ -18,9 +20,11 @@ export const StatisticsSection: React.FC<StatisticsSectionProps> = ({
   users,
   cards,
   votes,
+  matchRecords,
   activeSeason,
   seasonArchives,
   onOpenProfile,
+  canImportOcr,
   onOpenOcr,
 }) => {
   const [activeStatsTab, setActiveStatsTab] = useState<'routes' | 'averages' | 'archives'>('averages');
@@ -29,13 +33,17 @@ export const StatisticsSection: React.FC<StatisticsSectionProps> = ({
   const [tierFilter, setTierFilter] = useState<'all' | EloTier>('all');
   const [selectedSeasonNumber, setSelectedSeasonNumber] = useState(activeSeason.number);
   const activeCards = cards.filter((card) => card.season === activeSeason.number);
-  const average = votes.length ? Math.round(votes.reduce((sum, vote) => sum + vote.score, 0) / votes.length) : null;
-  const totalVotes = votes.length;
+  const activeSeasonVotes = votes.filter((vote) => vote.season === activeSeason.number);
+  const average = activeSeasonVotes.length
+    ? Math.round(activeSeasonVotes.reduce((sum, vote) => sum + vote.score, 0) / activeSeasonVotes.length)
+    : null;
+  const totalVotes = activeSeasonVotes.length;
   const availableSeasons = useMemo(() => [...new Set([
     activeSeason.number,
     ...seasonArchives.map((season) => season.number),
     ...votes.map((vote) => vote.season),
-  ])].sort((a, b) => b - a), [activeSeason.number, seasonArchives, votes]);
+    ...matchRecords.map((record) => record.season),
+  ])].sort((a, b) => b - a), [activeSeason.number, seasonArchives, votes, matchRecords]);
   useEffect(() => setSelectedSeasonNumber(activeSeason.number), [activeSeason.number]);
   const selectedSeason = availableSeasons.includes(selectedSeasonNumber)
     ? selectedSeasonNumber
@@ -70,21 +78,61 @@ export const StatisticsSection: React.FC<StatisticsSectionProps> = ({
       return a.user.name.localeCompare(b.user.name, 'pt-BR');
     });
   }, [users, selectedSeasonVotes, selectedSeasonArchive]);
+  const seasonalMatchRanking = useMemo(() => {
+    const recordsByPlayer = new Map<string, MatchRecord[]>();
+    for (const record of matchRecords) {
+      if (record.season !== selectedSeason) continue;
+      const playerRecords = recordsByPlayer.get(record.playerId) || [];
+      playerRecords.push(record);
+      recordsByPlayer.set(record.playerId, playerRecords);
+    }
+    return users.map((user) => {
+      const records = recordsByPlayer.get(user.id) || [];
+      const count = records.length;
+      const totals = records.reduce((sum, record) => ({
+        kills: sum.kills + record.stats.kills,
+        deaths: sum.deaths + record.stats.deaths,
+        assists: sum.assists + record.stats.assists,
+        minions: sum.minions + record.stats.minions,
+        gold: sum.gold + record.stats.gold,
+      }), { kills: 0, deaths: 0, assists: 0, minions: 0, gold: 0 });
+      const victories = records.filter((record) => record.result === 'victory').length;
+      const defeats = records.filter((record) => record.result === 'defeat').length;
+      return {
+        user,
+        count,
+        victories,
+        defeats,
+        unknownResults: count - victories - defeats,
+        averageKills: count ? totals.kills / count : null,
+        averageDeaths: count ? totals.deaths / count : null,
+        averageAssists: count ? totals.assists / count : null,
+        averageMinions: count ? totals.minions / count : null,
+        averageGold: count ? totals.gold / count : null,
+        kda: count ? (totals.kills + totals.assists) / Math.max(1, totals.deaths) : null,
+        winRate: victories + defeats ? victories / (victories + defeats) : null,
+      };
+    }).sort((a, b) => {
+      if (a.count !== b.count) return b.count - a.count;
+      if (a.kda !== null && b.kda !== null && a.kda !== b.kda) return b.kda - a.kda;
+      if (a.kda !== null && b.kda === null) return -1;
+      if (a.kda === null && b.kda !== null) return 1;
+      return a.user.name.localeCompare(b.user.name, 'pt-BR');
+    });
+  }, [users, matchRecords, selectedSeason]);
   const filteredSeasonalRanking = useMemo(() => {
     const query = rankingSearch.trim().toLocaleLowerCase('pt-BR');
-    return seasonalRanking
+    const ratingByPlayer = new Map(seasonalRanking.map(({ user, average: rating }) => [user.id, rating] as const));
+    return seasonalMatchRanking
       .filter(({ user }) => !query || `${user.name} ${user.handle} ${user.riotId}`.toLocaleLowerCase('pt-BR').includes(query))
       .filter(({ user }) => laneFilter === 'all' || user.primaryLane === laneFilter)
-      .filter(({ user, average: playerAverage }) => tierFilter === 'all' || (playerAverage !== null && getTierFromScore(playerAverage, Boolean(user.isCriminoso)) === tierFilter));
-  }, [seasonalRanking, rankingSearch, laneFilter, tierFilter]);
-  const archivedVoteCount = selectedSeasonArchive?.playerSnapshots.reduce((sum, player) => sum + player.totalVotes, 0) || 0;
-  const archivedScoreTotal = selectedSeasonArchive?.playerSnapshots.reduce((sum, player) => sum + (player.average ?? 0) * player.totalVotes, 0) || 0;
-  const seasonalVoteCount = selectedSeasonVotes.length || archivedVoteCount;
-  const seasonalAverage = selectedSeasonVotes.length
-    ? Math.round(selectedSeasonVotes.reduce((sum, vote) => sum + vote.score, 0) / selectedSeasonVotes.length)
-    : archivedVoteCount > 0 ? Math.round(archivedScoreTotal / archivedVoteCount) : null;
-  const seasonalPlayerCount = seasonalRanking.filter((entry) => entry.average !== null).length;
-  const seasonalCardCount = cards.filter((card) => card.season === selectedSeason).length;
+      .filter(({ user }) => {
+        if (tierFilter === 'all') return true;
+        const rating = ratingByPlayer.get(user.id);
+        return rating !== null && rating !== undefined && getTierFromScore(rating, Boolean(user.isCriminoso)) === tierFilter;
+      });
+  }, [seasonalMatchRanking, seasonalRanking, rankingSearch, laneFilter, tierFilter]);
+  const selectedSeasonRecords = matchRecords.filter((record) => record.season === selectedSeason);
 
   return (
     <div className="space-y-6">
@@ -94,9 +142,11 @@ export const StatisticsSection: React.FC<StatisticsSectionProps> = ({
           <h1 className="mt-1 font-display text-2xl font-black text-white">Estatísticas</h1>
           <p className="mt-1 text-sm text-slate-400">Acompanhe as médias, temporadas salvas e dados das partidas.</p>
         </div>
-        <button type="button" onClick={onOpenOcr} className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 px-4 py-3 text-sm font-bold text-white shadow-lg transition hover:from-sky-500 hover:to-indigo-500">
-          <ScanLine className="h-4 w-4" /> Importar partida com OCR
-        </button>
+        {canImportOcr && (
+          <button type="button" onClick={onOpenOcr} className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-sky-600 to-indigo-600 px-4 py-3 text-sm font-bold text-white shadow-lg transition hover:from-sky-500 hover:to-indigo-500">
+            <ScanLine className="h-4 w-4" /> Importar partida com OCR
+          </button>
+        )}
       </header>
 
       <section className="flex flex-col justify-between gap-3 rounded-2xl border border-amber-700/30 bg-gradient-to-r from-amber-950/20 via-slate-950 to-slate-950 p-4 sm:flex-row sm:items-center">
@@ -112,7 +162,7 @@ export const StatisticsSection: React.FC<StatisticsSectionProps> = ({
 
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Metric label="Média do elenco" value={average ?? '—'} note={average === null ? 'aguardando os primeiros votos' : 'calculada pelos votos'} icon={<BarChart3 className="h-4 w-4" />} />
-        <Metric label="Votos computados" value={totalVotes} note="em todos os jogadores" icon={<CheckCircle2 className="h-4 w-4" />} />
+        <Metric label="Votos computados" value={totalVotes} note={`na temporada ${activeSeason.number}`} icon={<CheckCircle2 className="h-4 w-4" />} />
         <Metric label="Jogadores" value={users.length} note="no elenco Personas" icon={<Trophy className="h-4 w-4" />} />
         <Metric label="Cartas da temporada" value={activeCards.length} note={`temporada ${activeSeason.number}`} icon={<CalendarClock className="h-4 w-4" />} />
       </div>
@@ -140,8 +190,8 @@ export const StatisticsSection: React.FC<StatisticsSectionProps> = ({
       {activeStatsTab === 'averages' && <section className="rounded-2xl border border-indigo-900/50 bg-gradient-to-br from-slate-950 via-slate-950 to-indigo-950/30 p-4 sm:p-5">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="font-display text-base font-bold text-white">Médias do elenco por temporada</h2>
-            <p className="mt-1 text-xs text-slate-400">Consulte e filtre os votos e as médias da temporada selecionada.</p>
+            <h2 className="font-display text-base font-bold text-white">Desempenho do elenco por temporada</h2>
+            <p className="mt-1 text-xs text-slate-400">As partidas importadas pelo OCR ficam acumuladas aqui, com médias por jogador.</p>
           </div>
           <label className="w-full sm:w-56">
             <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500">Temporada consultada</span>
@@ -151,12 +201,7 @@ export const StatisticsSection: React.FC<StatisticsSectionProps> = ({
           </label>
         </div>
 
-        <div className="mb-4 grid grid-cols-2 gap-2 xl:grid-cols-4">
-          <Metric label={`Média da temporada ${selectedSeason}`} value={seasonalAverage ?? '—'} note={seasonalAverage === null ? 'aguardando votos' : 'calculada pelos votos da temporada'} icon={<BarChart3 className="h-4 w-4" />} />
-          <Metric label="Votos na temporada" value={seasonalVoteCount} note="registros computados" icon={<CheckCircle2 className="h-4 w-4" />} />
-          <Metric label="Jogadores com média" value={seasonalPlayerCount} note={`de ${users.length} jogadores`} icon={<Trophy className="h-4 w-4" />} />
-          <Metric label="Cartas da temporada" value={seasonalCardCount} note={`temporada ${selectedSeason}`} icon={<CalendarClock className="h-4 w-4" />} />
-        </div>
+        {selectedSeasonRecords.length === 0 && <p className="mb-4 rounded-xl border border-dashed border-slate-800 p-4 text-center text-xs text-slate-500">Ainda não há partidas registradas nesta temporada. Importe um print e escolha vitória ou derrota para começar o histórico.</p>}
 
         <div className="mb-4 grid gap-2 sm:grid-cols-[minmax(180px,1fr)_150px_170px]">
           <label className="relative block">
@@ -181,16 +226,18 @@ export const StatisticsSection: React.FC<StatisticsSectionProps> = ({
         </div>
 
         <div className="space-y-1.5">
-          {filteredSeasonalRanking.map(({ user, average: playerAverage, voteCount }, index) => (
-            <button key={user.id} type="button" onClick={() => onOpenProfile(user)} className="grid w-full grid-cols-[24px_34px_minmax(0,1fr)_70px_42px] items-center gap-2 rounded-xl border border-transparent bg-slate-900/60 p-2 text-left transition hover:border-slate-700 hover:bg-slate-900 sm:grid-cols-[32px_40px_minmax(140px,1fr)_minmax(100px,180px)_82px_54px]">
-              <span className="font-mono text-[10px] font-bold text-slate-500">{String(index + 1).padStart(2, '0')}</span>
-              <img src={user.avatar} alt="" className="h-8 w-8 rounded-lg object-cover" />
-              <span className="min-w-0"><span className="block truncate text-xs font-bold text-white">{user.name}</span><span className="block truncate font-mono text-[9px] text-slate-500">{user.riotId || user.handle}</span></span>
-              <span className="hidden text-right sm:block">
-                {playerAverage === null ? <span className="text-[10px] text-slate-500">Sem votos</span> : <><span className="block text-[9px] uppercase text-slate-500">Média</span><span className="block h-1.5 overflow-hidden rounded-full bg-slate-800"><span className="block h-full rounded-full bg-gradient-to-r from-indigo-500 to-sky-400" style={{ width: `${Math.max(0, Math.min(100, playerAverage))}%` }} /></span></>}
+          {filteredSeasonalRanking.map(({ user, count, victories, defeats, unknownResults, averageKills, averageDeaths, averageAssists, averageMinions, averageGold, kda, winRate }, index) => (
+            <button key={user.id} type="button" onClick={() => onOpenProfile(user)} className="grid w-full grid-cols-2 items-center gap-2 rounded-xl border border-transparent bg-slate-900/60 p-2 text-left transition hover:border-slate-700 hover:bg-slate-900 sm:grid-cols-[30px_36px_minmax(120px,1fr)_repeat(5,minmax(80px,1fr))]">
+              <span className="col-span-2 flex min-w-0 items-center gap-2 sm:col-span-3">
+                <span className="w-7 shrink-0 font-mono text-[10px] font-bold text-slate-500">{String(index + 1).padStart(2, '0')}</span>
+                <img src={user.avatar} alt="" className="h-8 w-8 shrink-0 rounded-lg object-cover" />
+                <span className="min-w-0"><span className="block truncate text-xs font-bold text-white">{user.name}</span><span className="block truncate font-mono text-[9px] text-slate-500">{count ? `${count} ${count === 1 ? 'partida' : 'partidas'} · ${user.riotId || user.handle}` : `${user.riotId || user.handle} · Sem partidas`}</span></span>
               </span>
-              <span className="text-right font-mono text-[10px] text-slate-400">{voteCount} {voteCount === 1 ? 'voto' : 'votos'}</span>
-              <strong className={`text-right font-mono text-base font-black ${playerAverage === null ? 'text-slate-600' : 'text-indigo-200'}`}>{playerAverage ?? '—'}</strong>
+              <MatchMetric label="KDA" value={kda === null ? '—' : kda.toFixed(2)} />
+              <MatchMetric label="K / D / A" value={count ? `${averageKills!.toFixed(1)} / ${averageDeaths!.toFixed(1)} / ${averageAssists!.toFixed(1)}` : '—'} />
+              <MatchMetric label="Minions médios" value={averageMinions === null ? '—' : Math.round(averageMinions).toLocaleString('pt-BR')} />
+              <MatchMetric label="Ouro médio" value={averageGold === null ? '—' : Math.round(averageGold).toLocaleString('pt-BR')} />
+              <MatchMetric label="Win rate" value={winRate === null ? '—' : `${Math.round(winRate * 100)}%`} detail={victories + defeats > 0 ? `${victories} V · ${defeats} D` : unknownResults > 0 ? `${unknownResults} sem resultado` : undefined} />
             </button>
           ))}
           {filteredSeasonalRanking.length === 0 && <p className="rounded-xl border border-dashed border-slate-800 p-5 text-center text-xs text-slate-500">Nenhum jogador encontrado com esses filtros nesta temporada.</p>}
@@ -235,4 +282,12 @@ const Metric: React.FC<{ label: string; value: number | string; note: string; ic
     <strong className="mt-2 block font-mono text-2xl font-black text-white">{value}</strong>
     <span className="mt-0.5 block text-[10px] text-slate-500">{note}</span>
   </article>
+);
+
+const MatchMetric: React.FC<{ label: string; value: string; detail?: string }> = ({ label, value, detail }) => (
+  <span className="min-w-0 rounded-lg border border-slate-800/80 bg-slate-950/60 px-2 py-1.5 text-right sm:border-0 sm:bg-transparent sm:px-1">
+    <span className="block truncate text-[9px] font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+    <strong className="block truncate font-mono text-xs font-bold text-indigo-100">{value}</strong>
+    {detail && <span className="block truncate text-[9px] text-slate-500">{detail}</span>}
+  </span>
 );

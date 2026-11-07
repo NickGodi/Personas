@@ -268,3 +268,333 @@ on conflict (player_id) do update set
   gold = excluded.gold,
   updated_at = now();
 
+-- Histórico acumulado de partidas reconhecidas pelo OCR.
+create table if not exists public.player_match_records (
+  id uuid primary key default gen_random_uuid(),
+  player_id text not null check (char_length(player_id) between 1 and 128),
+  season integer not null check (season between 1 and 999),
+  result text not null check (result in ('victory', 'defeat', 'unrecorded')),
+  kills integer not null check (kills between 0 and 100),
+  deaths integer not null check (deaths between 0 and 100),
+  assists integer not null check (assists between 0 and 100),
+  minions integer not null check (minions between 0 and 2000),
+  gold integer not null check (gold between 0 and 1000000),
+  image_fingerprint text not null check (char_length(image_fingerprint) between 1 and 128),
+  created_at timestamptz not null default now(),
+  unique (player_id, season, image_fingerprint)
+);
+
+create index if not exists player_match_records_season_player_idx
+  on public.player_match_records (season, player_id);
+
+alter table public.player_match_records enable row level security;
+revoke all on table public.player_match_records from public, anon, authenticated;
+grant select on table public.player_match_records to anon, authenticated;
+grant insert, update on table public.player_match_records to authenticated;
+
+drop policy if exists "Anyone can read seasonal player match records" on public.player_match_records;
+create policy "Anyone can read seasonal player match records"
+  on public.player_match_records for select to anon, authenticated
+  using (true);
+
+drop policy if exists "Only creator can insert seasonal player match records" on public.player_match_records;
+create policy "Only creator can insert seasonal player match records"
+  on public.player_match_records for insert to authenticated
+  with check (
+    exists (
+      select 1 from public.profiles creator_profile
+      where creator_profile.id = (select auth.uid())
+        and creator_profile.role = 'criador'
+    )
+  );
+
+drop policy if exists "Only creator can update seasonal player match records" on public.player_match_records;
+create policy "Only creator can update seasonal player match records"
+  on public.player_match_records for update to authenticated
+  using (
+    exists (
+      select 1 from public.profiles creator_profile
+      where creator_profile.id = (select auth.uid())
+        and creator_profile.role = 'criador'
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles creator_profile
+      where creator_profile.id = (select auth.uid())
+        and creator_profile.role = 'criador'
+    )
+  );
+
+insert into public.player_match_records (
+  player_id, season, result, kills, deaths, assists, minions, gold, image_fingerprint
+)
+select player_id, 1, 'unrecorded', kills, deaths, assists, minions, gold, 'legacy:' || player_id
+from public.player_match_stats
+on conflict (player_id, season, image_fingerprint) do nothing;
+
+-- A shared season gate makes vote permissions consistent across browsers.
+create table if not exists public.shared_season_control (
+  singleton boolean primary key default true check (singleton),
+  season integer not null check (season between 1 and 999),
+  status text not null check (status in ('ready', 'active')),
+  started_at timestamptz,
+  ends_at timestamptz,
+  updated_at timestamptz not null default now(),
+  check (
+    (status = 'ready' and started_at is null and ends_at is null)
+    or (status = 'active' and started_at is not null and ends_at is not null)
+  )
+);
+
+insert into public.shared_season_control (singleton, season, status)
+values (true, 1, 'ready')
+on conflict (singleton) do nothing;
+
+alter table public.shared_season_control enable row level security;
+revoke all on table public.shared_season_control from public, anon, authenticated;
+grant usage on schema public to anon, authenticated;
+grant select on table public.shared_season_control to anon, authenticated;
+grant insert, update on table public.shared_season_control to authenticated;
+
+drop policy if exists "Anyone can read shared season control" on public.shared_season_control;
+create policy "Anyone can read shared season control"
+  on public.shared_season_control for select to anon, authenticated
+  using (true);
+
+drop policy if exists "Only creator can insert shared season control" on public.shared_season_control;
+create policy "Only creator can insert shared season control"
+  on public.shared_season_control for insert to authenticated
+  with check (
+    exists (
+      select 1 from public.profiles creator_profile
+      where creator_profile.id = (select auth.uid())
+        and creator_profile.role = 'criador'
+    )
+  );
+
+drop policy if exists "Only creator can update shared season control" on public.shared_season_control;
+create policy "Only creator can update shared season control"
+  on public.shared_season_control for update to authenticated
+  using (
+    exists (
+      select 1 from public.profiles creator_profile
+      where creator_profile.id = (select auth.uid())
+        and creator_profile.role = 'criador'
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles creator_profile
+      where creator_profile.id = (select auth.uid())
+        and creator_profile.role = 'criador'
+    )
+  );
+
+create table if not exists public.season_player_votes (
+  id uuid primary key default gen_random_uuid(),
+  season integer not null check (season between 1 and 999),
+  voter_auth_user_id uuid not null references auth.users(id) on delete cascade,
+  from_user_id text not null check (char_length(from_user_id) between 1 and 128),
+  from_user_name text not null check (char_length(from_user_name) between 1 and 48),
+  from_user_handle text not null check (char_length(from_user_handle) between 2 and 25),
+  target_user_id text not null check (char_length(target_user_id) between 1 and 128),
+  target_user_name text not null check (char_length(target_user_name) between 1 and 48),
+  score integer not null check (score between 0 and 100),
+  comment text check (comment is null or char_length(comment) <= 500),
+  created_at timestamptz not null default now(),
+  constraint season_player_votes_once_per_target unique (season, voter_auth_user_id, target_user_id)
+);
+
+create index if not exists season_player_votes_season_target_idx
+  on public.season_player_votes (season, target_user_id);
+create index if not exists season_player_votes_voter_auth_user_idx
+  on public.season_player_votes (voter_auth_user_id);
+
+alter table public.season_player_votes enable row level security;
+revoke all on table public.season_player_votes from public, anon, authenticated;
+grant select on table public.season_player_votes to anon, authenticated;
+grant insert, delete on table public.season_player_votes to authenticated;
+
+drop policy if exists "Anyone can read shared season votes" on public.season_player_votes;
+create policy "Anyone can read shared season votes"
+  on public.season_player_votes for select to anon, authenticated
+  using (true);
+
+drop policy if exists "Authenticated users can rate once while season is active" on public.season_player_votes;
+create policy "Authenticated users can rate once while season is active"
+  on public.season_player_votes for insert to authenticated
+  with check (
+    voter_auth_user_id = (select auth.uid())
+    and from_user_id = (select auth.uid())::text
+    and exists (
+      select 1 from public.profiles voter_profile
+      where voter_profile.id = (select auth.uid())
+        and voter_profile.name = season_player_votes.from_user_name
+        and voter_profile.handle = season_player_votes.from_user_handle
+    )
+    and exists (
+      select 1 from public.shared_season_control season_control
+      where season_control.singleton = true
+        and season_control.season = season_player_votes.season
+        and season_control.status = 'active'
+    )
+  );
+
+drop policy if exists "Only creator can delete season votes" on public.season_player_votes;
+create policy "Only creator can delete season votes"
+  on public.season_player_votes for delete to authenticated
+  using (
+    exists (
+      select 1 from public.profiles creator_profile
+      where creator_profile.id = (select auth.uid())
+        and creator_profile.role = 'criador'
+    )
+  );
+
+-- User-scoped in-app notifications. Ratings are delivered only to creator accounts.
+-- Creator accounts may rate their own profile once per season; everyone else may
+-- only rate other profiles. This keeps the UI rule enforced by the database too.
+drop policy if exists "Authenticated users can rate once while season is active" on public.season_player_votes;
+create policy "Authenticated users can rate once while season is active"
+  on public.season_player_votes for insert to authenticated
+  with check (
+    voter_auth_user_id = (select auth.uid())
+    and from_user_id = (select auth.uid())::text
+    and exists (
+      select 1 from public.profiles voter_profile
+      where voter_profile.id = (select auth.uid())
+        and voter_profile.name = season_player_votes.from_user_name
+        and voter_profile.handle = season_player_votes.from_user_handle
+    )
+    and (
+      target_user_id <> from_user_id
+      or exists (
+        select 1 from public.profiles creator_profile
+        where creator_profile.id = (select auth.uid())
+          and creator_profile.role = 'criador'
+      )
+    )
+    and exists (
+      select 1 from public.shared_season_control season_control
+      where season_control.singleton = true
+        and season_control.season = season_player_votes.season
+        and season_control.status = 'active'
+    )
+  );
+
+create table if not exists public.user_notifications (
+  event_key text primary key check (char_length(event_key) between 1 and 200),
+  recipient_auth_user_id uuid not null references auth.users(id) on delete cascade,
+  title text not null check (char_length(title) between 1 and 100),
+  message text not null check (char_length(message) between 1 and 500),
+  type text not null check (type in ('vote', 'team', 'captain_request', 'report', 'system', 'card')),
+  read boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists user_notifications_recipient_created_idx
+  on public.user_notifications (recipient_auth_user_id, created_at desc);
+
+alter table public.user_notifications enable row level security;
+revoke all on table public.user_notifications from public, anon, authenticated;
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on table public.user_notifications to authenticated;
+
+drop policy if exists "Users can read their notifications; creators can read vote notices" on public.user_notifications;
+create policy "Users can read their notifications; creators can read vote notices"
+  on public.user_notifications for select to authenticated
+  using (
+    recipient_auth_user_id = (select auth.uid())
+    and (
+      type <> 'vote'
+      or exists (
+        select 1 from public.profiles creator_profile
+        where creator_profile.id = (select auth.uid())
+          and creator_profile.role = 'criador'
+      )
+    )
+  );
+
+drop policy if exists "Only creators can insert event notifications" on public.user_notifications;
+create policy "Only creators can insert event notifications"
+  on public.user_notifications for insert to authenticated
+  with check (
+    exists (
+      select 1 from public.profiles creator_profile
+      where creator_profile.id = (select auth.uid())
+        and creator_profile.role = 'criador'
+    )
+    and type <> 'vote'
+  );
+
+drop policy if exists "Users can update their notifications; creators can update vote notices" on public.user_notifications;
+create policy "Users can update their notifications; creators can update vote notices"
+  on public.user_notifications for update to authenticated
+  using (
+    recipient_auth_user_id = (select auth.uid())
+    and (
+      type <> 'vote'
+      or exists (
+        select 1 from public.profiles creator_profile
+        where creator_profile.id = (select auth.uid())
+          and creator_profile.role = 'criador'
+      )
+    )
+  )
+  with check (
+    recipient_auth_user_id = (select auth.uid())
+    and (
+      type <> 'vote'
+      or exists (
+        select 1 from public.profiles creator_profile
+        where creator_profile.id = (select auth.uid())
+          and creator_profile.role = 'criador'
+      )
+    )
+  );
+
+drop policy if exists "Users can delete their notifications; creators can delete vote notices" on public.user_notifications;
+create policy "Users can delete their notifications; creators can delete vote notices"
+  on public.user_notifications for delete to authenticated
+  using (
+    recipient_auth_user_id = (select auth.uid())
+    and (
+      type <> 'vote'
+      or exists (
+        select 1 from public.profiles creator_profile
+        where creator_profile.id = (select auth.uid())
+          and creator_profile.role = 'criador'
+      )
+    )
+  );
+
+create or replace function public.notify_creators_of_new_vote()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  insert into public.user_notifications (event_key, recipient_auth_user_id, title, message, type)
+  select
+    'vote:' || new.id::text,
+    creator_profile.id,
+    'Nova nota recebida',
+    format('%s avaliou %s com nota %s na temporada %s.', new.from_user_name, new.target_user_name, new.score, new.season),
+    'vote'
+  from public.profiles creator_profile
+  where creator_profile.role = 'criador'
+  on conflict (event_key) do nothing;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.notify_creators_of_new_vote() from public, anon, authenticated;
+
+drop trigger if exists notify_creators_after_vote on public.season_player_votes;
+create trigger notify_creators_after_vote
+  after insert on public.season_player_votes
+  for each row execute function public.notify_creators_of_new_vote();
+

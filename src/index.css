@@ -343,6 +343,37 @@
   100% { opacity: 0; transform: translateY(115vh) rotate(800deg); }
 }
 
+.card-confirmation-confetti {
+  position: absolute;
+  inset: -12px -8px;
+  z-index: 20;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.card-confirmation-confetti__piece {
+  position: absolute;
+  width: 7px;
+  height: 11px;
+  border-radius: 2px;
+  opacity: 0;
+  animation: card-confirmation-confetti-pop 1.25s cubic-bezier(.16,.72,.32,1) both;
+}
+
+@keyframes card-confirmation-confetti-pop {
+  0% { opacity: .95; transform: translate(0, 0) rotate(0deg); }
+  100% {
+    opacity: 0;
+    transform: translate(var(--confetti-x), var(--confetti-y)) rotate(var(--confetti-rotation));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-confirmation-confetti__piece {
+    animation: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .season-celebration,
   .season-celebration__panel,

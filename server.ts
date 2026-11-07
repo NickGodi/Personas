@@ -33,6 +33,51 @@ function getOnlineUserIds() {
   return [...onlineUserIds];
 }
 
+function stableTournamentValue(value: any): any {
+  if (Array.isArray(value)) return value.map(stableTournamentValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableTournamentValue(value[key])]));
+}
+
+function mayChangeCaptainReroll(current: Record<string, any> | null, nextState: Record<string, any>, actorId: string) {
+  if (!current) return false;
+  const comparable = (state: Record<string, any>) => {
+    const { updatedAt: _updatedAt, captainRerollRequest: _reroll, ...copy } = state;
+    copy.confirmedDeckCardId ??= null;
+    copy.interClassDraw ??= null;
+    return copy;
+  };
+  if (JSON.stringify(stableTournamentValue(comparable(current))) !== JSON.stringify(stableTournamentValue(comparable(nextState)))) return false;
+
+  const [firstCaptain, secondCaptain] = current.captainIds || [];
+  if (!firstCaptain || !secondCaptain || firstCaptain === secondCaptain
+    || !current.attendeeIds.includes(firstCaptain) || !current.attendeeIds.includes(secondCaptain)
+    || !current.confirmedDeckCardId || ![firstCaptain, secondCaptain].includes(actorId)) return false;
+
+  const existing = current.captainRerollRequest || null;
+  const next = nextState.captainRerollRequest || null;
+  if (!existing && next) {
+    const opponentId = actorId === firstCaptain ? secondCaptain : firstCaptain;
+    return next.status === 'waiting_opponent'
+      && next.requesterId === actorId
+      && next.opponentId === opponentId
+      && typeof next.requesterName === 'string' && next.requesterName.trim().length > 0
+      && !next.acceptedBy && !next.acceptedByName;
+  }
+  if (existing?.status === 'waiting_opponent' && existing.opponentId === actorId) {
+    if (!next) return true;
+    return next.status === 'waiting_creator'
+      && next.id === existing.id
+      && next.requesterId === existing.requesterId
+      && next.requesterName === existing.requesterName
+      && next.opponentId === existing.opponentId
+      && next.createdAt === existing.createdAt
+      && next.acceptedBy === actorId
+      && typeof next.acceptedByName === 'string' && next.acceptedByName.trim().length > 0;
+  }
+  return false;
+}
+
 async function loadSharedTournamentState() {
   if (sharedTournamentStateLoaded) return;
   try {
@@ -66,6 +111,46 @@ async function startServer() {
   app.post('/api/auth/login', async (req, res) => {
     const result = await signInWithLogin(req.body?.login, req.body?.password, req.ip || 'local');
     return res.status(result.status).json(result.body);
+  });
+
+  app.post('/api/reset-seasons', async (req, res) => {
+    const authorization = req.get('authorization');
+    if (!authorization?.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Entre na sua conta para resetar as temporadas.' });
+    }
+
+    const configuredOcrUrl = process.env.PERSONAS_OCR_API_URL;
+    if (!configuredOcrUrl) {
+      return res.status(503).json({ error: 'O servidor local não está conectado ao backend compartilhado.' });
+    }
+
+    let upstreamUrl: URL;
+    try {
+      upstreamUrl = new URL(configuredOcrUrl);
+    } catch {
+      return res.status(503).json({ error: 'A URL do backend compartilhado está inválida.' });
+    }
+    if (upstreamUrl.protocol !== 'https:' || upstreamUrl.hostname !== 'personas-mu.vercel.app' || upstreamUrl.pathname !== '/api/ocr') {
+      return res.status(503).json({ error: 'Configure PERSONAS_OCR_API_URL com o endpoint HTTPS do backend do Personas.' });
+    }
+
+    upstreamUrl.pathname = '/api/reset-seasons';
+    upstreamUrl.search = '';
+    try {
+      const upstreamResponse = await fetch(upstreamUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authorization,
+        },
+        body: JSON.stringify({}),
+      });
+      const responseBody = await upstreamResponse.text();
+      const responseType = upstreamResponse.headers.get('content-type')?.split(';', 1)[0] || 'application/json';
+      return res.status(upstreamResponse.status).type(responseType).send(responseBody);
+    } catch {
+      return res.status(502).json({ error: 'Não foi possível conectar ao backend do Personas. Tente novamente.' });
+    }
   });
 
   // Presence is session based; old heartbeats expire if a tab closes unexpectedly.
@@ -104,6 +189,18 @@ async function startServer() {
       || !Array.isArray(state.teams) || !Array.isArray(state.attendeeIds)
       || !Array.isArray(state.captainIds) || state.captainIds.length !== 2
       || !Array.isArray(state.playerPoolIds)
+      || (state.confirmedDeckCardId !== undefined && state.confirmedDeckCardId !== null && typeof state.confirmedDeckCardId !== 'string')
+      || (state.captainRerollRequest != null && !(typeof state.captainRerollRequest.id === 'string'
+        && typeof state.captainRerollRequest.requesterId === 'string'
+        && typeof state.captainRerollRequest.requesterName === 'string'
+        && typeof state.captainRerollRequest.opponentId === 'string'
+        && ['waiting_opponent', 'waiting_creator'].includes(state.captainRerollRequest.status)
+        && Number.isFinite(state.captainRerollRequest.createdAt)))
+      || (state.interClassDraw != null && !(typeof state.interClassDraw.cardId === 'string'
+        && ['Magos', 'Lutadores', 'Assassinos', 'Suportes', 'Atiradores', 'Tanks'].includes(state.interClassDraw.blueClass)
+        && ['Magos', 'Lutadores', 'Assassinos', 'Suportes', 'Atiradores', 'Tanks'].includes(state.interClassDraw.redClass)
+        && state.interClassDraw.blueClass !== state.interClassDraw.redClass
+        && Number.isFinite(state.interClassDraw.drawnAt)))
       || !state.attendeeIds.every((id: unknown) => typeof id === 'string')
       || !state.captainIds.every((id: unknown) => typeof id === 'string')
       || !state.playerPoolIds.every((id: unknown) => typeof id === 'string')
@@ -145,6 +242,10 @@ async function startServer() {
       mayUpdate = changedIds.length === 1
         && changedIds[0] === actorId
         && JSON.stringify(currentWithoutAttendance) === JSON.stringify(nextWithoutAttendance);
+    }
+
+    if (!mayUpdate && typeof actorId === 'string') {
+      mayUpdate = mayChangeCaptainReroll(current, state, actorId);
     }
 
     // During captain draft, only the captain whose turn is active can add one confirmed player.
